@@ -31,31 +31,49 @@ class PID:
         self.setMax(max)
         self.Initialize()
 
-    def setKp(self, invar): # Set proportional gain
+    def setKp(self, invar):
+        """ Sets proportional gain
+        """
         self.Kp = invar
 
-    def setKi(self, invar): # Set integral gain
+    def setKi(self, invar): 
+        """ Set integral gain
+        """
         self.Ki = invar
 
-    def resetIntegral(self): # reset integral part
+    def resetIntegral(self): 
+        """ reset integral part
+        """
         self.Ci = 0
 
-    def setKd(self, invar): # Set derivative gain
+    def setKd(self, invar): 
+        """ Set derivative gain
+        """
         self.Kd = invar
 
-    def setPrevErr(self, preverr): # Set previous error value
+    def setPrevErr(self, preverr): 
+        """ Set previous error value
+        """
         self.prev_err = preverr
 
-    def setMin(self, outMin): # Set lower limit for output
+    def setMin(self, outMin): 
+        """ Set lower limit for output
+        """
         self.outMin = outMin
 
-    def setMax(self, outMax): # Set lower limit for output
+    def setMax(self, outMax): 
+        """ Set lower limit for output
+        """
         self.outMax = outMax
 
-    def setSetpoint(self, setPoint): # Set lower limit for output
+    def setSetpoint(self, setPoint): 
+        """ Set lower limit for output
+        """
         self.setPoint = setPoint
 
-    def Initialize(self): # initialize delta t variables
+    def Initialize(self): 
+        """ initialize delta t variables
+        """
         self.currtm = time.time()
         self.prevtm = self.currtm
         self.prev_err = 0
@@ -76,7 +94,9 @@ class PID:
         de = error - self.prev_err              # get delta error
 
         self.Cp = self.Kp * error               # proportional term
-        if self.onLimit == 0 or (self.onLimit ==1 and error>0) or (self.onLimit == 2 and error<0): # no limit reached or moving away from limit
+        if self.onLimit == 0 or (self.onLimit ==1 and error>0) or (self.onLimit == 2 and error<0):
+            """ integration is only allowed if no limit reached or when output is moving away from limit
+            """
             self.onLimit=0
             self.Ci += error * dt                   # integral term
 
@@ -87,8 +107,7 @@ class PID:
         self.prevtm = self.currtm               # save t for next pass
         self.prev_err = error                   # save t-1 error
 
-        # sum the terms and return the result
-        Output=self.Cp + (self.Ki * self.Ci) + (self.Kd * self.Cd)
+        Output=self.Cp + (self.Ki * self.Ci) + (self.Kd * self.Cd) # sum the terms and return the result
         if self.outMax != None:
             if Output > self.outMax:
                 self.onLimit=2 # reached hi limit
@@ -98,4 +117,5 @@ class PID:
                 self.onLimit=1 # reached lo limit
                 Output=self.outMin
 
-        return Output,self.Cp,(self.Ki * self.Ci),(self.Kd * self.Cd),error,self.onLimit # [out,p,i,d,e,limit]
+        return Output,self.Cp,(self.Ki * self.Ci),(self.Kd * self.Cd),error,self.onLimit 
+        """ returns tuple as [output_value, p-component, i-component, d-component, error, onLimit]
