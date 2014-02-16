@@ -24,7 +24,7 @@ class PID:
     """ Simple PID control.
         This class implements a simplistic PID control algorithm.
     """
-    def __init__(self, setpoint = 0, P = 1.0, I = 0.0, D = 0.0, min = None, max = None): # initialize gains
+    def __init__(self, setpoint = 0, P = 1.0, I = 0.01, D = 0.0, min = None, max = None): # initialize gains
         self.setSetpoint(setpoint)
         self.setKp(P)
         self.setKi(I)
@@ -125,14 +125,15 @@ class PID:
         de = error - self.prev_err              # get delta error
 
         self.Cp = self.Kp * error               # proportional term
-        if self.Ki > 0 and (self.onLimit == 0 or (self.onLimit == -1 and error > 0) or (self.onLimit == 1 and error < 0)):
-            #integration is only allowed if Ki not zero and no limit reached or when output is moving away from limit
-            self.onLimit = 0
-            self.Ci += error * dt                   # integral term
-            #print('pid: integration done, new Ci='+str(round(self.Ci)))
-        else: 
-            pass
-            #print('pid: integration forbidden due to saturation') # debug
+        if self.Ki > 0:
+            if (self.onLimit == 0 or (self.onLimit == -1 and error > 0) or (self.onLimit == 1 and error < 0)):
+                #integration is only allowed if Ki not zero and no limit reached or when output is moving away from limit
+                self.onLimit = 0
+                self.Ci += error * dt                   # integral term
+                #print('pid: integration done, new Ci='+str(round(self.Ci)))
+            else: 
+                pass
+                print('pid: integration forbidden due to saturation, onLimit '+str(self.onLimit)) # debug
 
         self.Cd = 0
         if dt > 0:                              # no div by zero
@@ -146,12 +147,21 @@ class PID:
             if out > self.outMax:
                 self.onLimit = 1 # reached hi limit
                 out = self.outMax
+        else: # no upper limit
+            pass # add here
+                
         if self.outMin is not None:
             if out < self.outMin:
                 self.onLimit = -1 # reached lo limit
                 out = self.outMin
-
-        
+        else:
+            pass # add here
+        if self.outMin is not None and self.outMax is not None: # to be sure about onLimit, double check
+            if out > self.outMin and out < self.outMax:
+                if self.onLimit != 0:
+                    print('pid: fixing onLimit error value '+str(self.onLimit)+' to zero!') 
+                    self.onLimit = 0 # fix possible error
+                
         print('pid sp',round(self.setPoint),', actual',invar,', out',round(out),', p i d',round(self.Cp), round(self.Ki * self.Ci), round(self.Kd * self.Cd),', onlimit',self.onLimit) # debug
         return out, self.Cp, (self.Ki * self.Ci), (self.Kd * self.Cd), error, self.onLimit
 
@@ -167,7 +177,6 @@ class ThreeStep:
         self.setMinpulseLength(minpulse)
         self.setMinpulseError(minerror)
         self.setRunPeriod(runperiod)
-        
         self.Initialize() 
         
         
@@ -217,10 +226,9 @@ class ThreeStep:
         self.runtime = 0 # cumulative runtime towards up - low
         self.onLimit = 0
         
-        
 
-    def extrapolate(self, x, x1 = 0, y1 = 0, x2 = 0, y2 = 0):
-        """ Returns extrapolated value y based on x and two points defined by x1y1 and x2y2 """ 
+    def interpolate(self, x, x1 = 0, y1 = 0, x2 = 0, y2 = 0):
+        """ Returns linearly interpolated value y based on x and two known points defined by x1y1 and x2y2 """ 
         if y1 != y2: # valid data to avoid division by zero
             return y1+(x-x1)*(y2-y1)/(x2-x1)
         else:
@@ -269,13 +277,13 @@ class ThreeStep:
             if abs(error) > self.MinpulseError: # pulse is needed
                 print('threestep: new pulse needed due to error vs minpulseerror',error,self.MinpulseError) # debug
                 if error > 0 and error > self.MinpulseError: # pulse to run higher needed
-                    length = self.extrapolate(error, self.MinpulseError, self.MinpulseLength, self.MaxpulseError, self.MaxpulseLength)
+                    length = self.interpolate(error, self.MinpulseError, self.MinpulseLength, self.MaxpulseError, self.MaxpulseLength)
                     self.last_length = length
                     self.last_start = self.currtime
                     state = 1
                     print('threestep: started pulse w len',length) # debug
                 elif error < 0 and error < -self.MinpulseError: # pulse to run lower needed
-                    length = self.extrapolate(error, -self.MinpulseError, -self.MinpulseLength, -self.MaxpulseError, -self.MaxpulseLength)
+                    length = self.interpolate(error, -self.MinpulseError, -self.MinpulseLength, -self.MaxpulseError, -self.MaxpulseLength)
                     self.last_length = length
                     self.last_start = self.currtime
                     state = -1
