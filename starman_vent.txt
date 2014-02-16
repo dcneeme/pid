@@ -1,0 +1,158 @@
+ebmpabst ventikatega jahmerdamine 13.2.2014 starmanis
+
+                                                        100% 5060     4.9KB/s   00:00
+[root@d4c_controller d4c]# python mb.py 1 53505 1
+['mb.py', '1', '53505', '1']
+reading 1 registers starting from 53505
+mba 1 regaddr 53505 regcount 1
+ok  0000
+result [0]
+[root@d4c_controller d4c]# python mb.py 1 53505 0001
+['mb.py', '1', '53505', '0001']
+writing single register data 1
+mba 1 regaddr 53505 data 1
+ok
+[root@d4c_controller d4c]# python mb.py 1 53505 1
+['mb.py', '1', '53505', '1']
+reading 1 registers starting from 53505
+mba 1 regaddr 53505 regcount 1
+ok  0001
+result [1]
+[root@d4c_controller d4c]# python mb.py 2 53505 0001
+['mb.py', '2', '53505', '0001']
+writing single register data 1
+mba 2 regaddr 53505 data 1
+ok
+[root@d4c_controller d4c]#
+[root@d4c_controller d4c]# python mb.py 2 53505 1  # rs485 juht
+['mb.py', '2', '53505', '1']
+reading 1 registers starting from 53505
+mba 2 regaddr 53505 regcount 1
+ok  0001
+result [1]
+[root@d4c_controller d4c]#
+[root@d4c_controller d4c]# python mb.py 2 53507 1
+['mb.py', '2', '53507', '1']
+reading 1 registers starting from 53507
+mba 2 regaddr 53507 regcount 1
+ok  0001
+result [1]
+[root@d4c_controller d4c]# python mb.py 2 53524 1
+['mb.py', '2', '53524', '1']
+reading 1 registers starting from 53524
+mba 2 regaddr 53524 regcount 1
+ok  0000
+result [0]
+[root@d4c_controller d4c]# python mb.py 2 53525 1
+['mb.py', '2', '53525', '1']
+reading 1 registers starting from 53525
+mba 2 regaddr 53525 regcount 1
+ok  0000
+result [0]
+[root@d4c_controller d4c]# python mb.py 2 53507 0001
+['mb.py', '2', '53507', '0001']
+writing single register data 1
+mba 2 regaddr 53507 data 1
+ok
+[root@d4c_controller d4c]# python mb.py 1 53507 0001
+['mb.py', '1', '53507', '0001']
+writing single register data 1
+mba 1 regaddr 53507 data 1
+ok
+[root@d4c_controller d4c]#
+[root@d4c_controller d4c]#
+[root@d4c_controller d4c]#
+[root@d4c_controller d4c]#
+[root@d4c_controller d4c]# python mb.py 3 1 1
+['mb.py', '3', '1', '1']
+reading 1 registers starting from 1
+mba 3 regaddr 1 regcount 1
+ok  0061
+result [97]
+[root@d4c_controller d4c]# python mb.py 1 53507 1
+['mb.py', '1', '53507', '1']
+reading 1 registers starting from 53507
+mba 1 regaddr 53507 regcount 1
+ok  0001
+result [1]
+[root@d4c_controller d4c]# python mb.py 1 53505 1
+['mb.py', '1', '53505', '1']
+reading 1 registers starting from 53505
+mba 1 regaddr 53505 regcount 1
+ok  0001
+result [1]
+[root@d4c_controller d4c]# python mb.py 1 53248 0002
+['mb.py', '1', '53248', '0002']
+writing single register data 2
+mba 1 regaddr 53248 data 2
+ok
+[root@d4c_controller d4c]# python mb.py 2 53248 0002
+['mb.py', '2', '53248', '0002']
+writing single register data 2
+mba 2 regaddr 53248 data 2
+ok
+[root@d4c_controller d4c]#
+[root@d4c_controller d4c]#
+[root@d4c_controller d4c]# python mb.py 2 53524 ffff
+['mb.py', '2', '53524', 'ffff']
+writing single register data 65535
+mba 2 regaddr 53524 data 65535
+ok
+[root@d4c_controller d4c]# python mb.py 1 53524 ffff
+['mb.py', '1', '53524', 'ffff']
+writing single register data 65535
+mba 1 regaddr 53524 data 65535
+ok
+[root@d4c_controller d4c]# python mb.py 1 53525 ffff
+['mb.py', '1', '53525', 'ffff']
+writing single register data 65535
+mba 1 regaddr 53525 data 65535
+ok
+[root@d4c_controller d4c]# python mb.py 2 53525 ffff
+['mb.py', '2', '53525', 'ffff']
+writing single register data 65535
+mba 2 regaddr 53525 data 65535
+ok
+[root@d4c_controller d4c]# python mb.py 2 53634 1
+['mb.py', '2', '53634', '1']
+reading 1 registers starting from 53634
+mba 2 regaddr 53634 regcount 1
+ok  d19e
+result [53662]
+[root@d4c_controller d4c]# python mb.py 1 53634 1
+['mb.py', '1', '53634', '1']
+reading 1 registers starting from 53634
+mba 1 regaddr 53634 regcount 1
+ok  d19e
+result [53662]
+[root@d4c_controller d4c]# python mb.py 1 53505 0000
+['mb.py', '1', '53505', '0000']
+writing single register data 0
+mba 1 regaddr 53505 data 0
+ok
+[root@d4c_controller d4c]# python mb.py 2 53505 0000 # tagasi 10V
+['mb.py', '2', '53505', '0000']
+writing single register data 0
+mba 2 regaddr 53505 data 0
+ok
+[root@d4c_controller d4c]# python mb.py 2 53248 0002 # copy RAM
+['mb.py', '2', '53248', '0002']
+writing single register data 2
+mba 2 regaddr 53248 data 2
+ok
+[root@d4c_controller d4c]# python mb.py 1 53248 0002 # copy RAM
+['mb.py', '1', '53248', '0002']
+writing single register data 2
+
+vaja teha nii, et defauklt oleksk man ja rs485 peale saaks programselt.
+
+
+
+1500 13.02.2014 viimane versioon laks hulluks, ai vaartused metsas? actual f1 48 ja f2 1942....
+
+id sp 235 , actual 56 , out 291 , p i d 0 291 0 , onlimit 0
+pid sp 291 , actual 1515 , out 180 , p i d 0 376 -15245 , onlimit -1  # kust selline actual???? validate!
+
+
+
+
