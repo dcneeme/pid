@@ -4,7 +4,7 @@
 # 3) listening commands and new setup values from the central server; 4) comparing the dochannel values with actual do values in dichannels table and writes to eliminate  the diff.
 # currently supported commands: REBOOT, VARLIST, pull, sqlread, run
 
-APVER='channelmonitor_starman.py 15.02.2014'  # linux and python3 -compatible. for STARMAN only.
+APVER='channelmonitor_starman.py 21.02.2014'  # linux and python3 -compatible. for STARMAN only.
 
 # 23.06.2013 based on channelmonitor3.py
 # 25.06.2013 added push cmd, any (mostly sql or log) file from d4c directory to be sent into pyapp/mac on itvilla.ee, this SHOULD BE controlled by setup.sql - NOT YET!
@@ -63,8 +63,14 @@ APVER='channelmonitor_starman.py 15.02.2014'  # linux and python3 -compatible. f
 # 12.04.2014 silumised SP pid ja ajam. mba for io in master device from devices!!!
 # 13.02.2014 tsirk pumpade juhtimine kaima addr 3 ja 4, proportsionaalselt kyttevee temperatuuri etteandega lubatud piirides sees, 0..200 (0..100%)
 # 15.02.2014 trying pymodbus timeout 0.2->0.3s, 1s delay to autorecover on every modbus error found
+# 16.02.2010 panic
+# 17.02.2014 Tairin_setpoint S200, mitte VT alusel. tee 3T ajami nihutamine pumbakiiruse onlimit alusel.
+# 18.02.2014 ajami nihutamine mootori onlimit alusel, f4 actualiks, sp=0, minerror 0.5.  S200 juhib sissepuhet alla valjatombe. seda voiks saada ajas nihutada. gcal?
+# 21.02.2014 added reading input registers for aichannels, based on type. pump_onlinmit alusel ajami juhtimine korda, f4 minerror olgu alla 1!
+  #  kontrolli ai-ai sync suhet inout registritega, kui sama adr 3.1 4.1 holding ja input!!! esialgu kommenteerisin valja rohuvahe
   
 # PROBLEMS and TODO
+# LISA MBERR DICT, pymodbus client close vaid siis kui koikide mba-dega jama
 # inserting to sent2server has problems. skipping it for now, no local log therefore.
 
 
@@ -706,6 +712,7 @@ def write_dochannels(): # synchronizes DO bits (output channels) with data in do
 
 
 def read_aichannels(): # analogue inputs via modbusTCP, to be executed regularly (about 1..3 s interval). do not send here.
+    #if input register instead of holding, use fc04 = client.read_input_...  based on bit value 8 in aichannels.type
     locstring="" # local
     global inumm,ts,ts_inumm,mac,tcpdata, tcperr
     mba=0 # lokaalne siin
@@ -757,6 +764,7 @@ def read_aichannels(): # analogue inputs via modbusTCP, to be executed regularly
                 ovalue=0 # previous (possibly averaged) value
                 ots=0 # eelmine ts value ja status ja raw oma
                 avg=0 # keskmistamistegur, mojub alates 2
+                type=0
                 desc=''
                 comment=''
                 # 0       1     2     3     4   5  6  7  8  9    10     11  12    13  14   15     16  17    18
@@ -796,6 +804,7 @@ def read_aichannels(): # analogue inputs via modbusTCP, to be executed regularly
                     ots=int(srow[16])
                 desc=srow[17]
                 comment=srow[18]
+                type=srow[19] # int. if bit value involves 8, then input register instead of holding
 
 
                 if mba>=0 and mba<256 and regadd>=0 and regadd<65536:  # valid mba and regaddr, let's read in aichannels table
@@ -803,7 +812,10 @@ def read_aichannels(): # analogue inputs via modbusTCP, to be executed regularly
                     
                     #if respcode == 0: # got  tcpdata as register content. convert to scale.
                     try:
-                        result = client.read_holding_registers(address=regadd, count=1, unit=mba)
+                        if (type&8): # input register
+                            result = client.read_input_registers(address=regadd, count=1, unit=mba) # using fc04
+                        else:
+                            result = client.read_holding_registers(address=regadd, count=1, unit=mba) # using fc03
                         tcpdata = result.registers[0] # reading modbus slave
                         msg=msg+' raw '+str(tcpdata)
                         if mba<5:
@@ -1038,8 +1050,8 @@ def make_aichannel_svc(val_reg,sta_reg):  # make a single service record based o
         if mts < ots:
             mts=ots # latest update to the service must be not too old!
 
-        if mba>=0 and mba<256 and regadd>=0 and regadd<65536:  # valid mba and regaddr, read value in aichannels table
-            print('reporting ai service',val_reg,'member',member,'with value',ovalue,'and status',ostatus)  # ajutine
+        #if mba>=0 and mba<256 and regadd>=0 and regadd<65536:  # valid mba and regaddr, read value in aichannels table
+        #    print('reporting ai service',val_reg,'member',member,'with value',ovalue,'and status',ostatus)  # debug
 
         #else: # see keeraski kihva statuse arvutuse...
         #    value=ovalue # possible setpoint, ovalue from aichannels table, no modbus reading or status reporting for this
@@ -1064,7 +1076,7 @@ def make_aichannel_svc(val_reg,sta_reg):  # make a single service record based o
     if (ts-mts  < 2*appdelay): # has been updated lately
         conn1.execute(Cmd1) # write aichannels data into buff2server
     else:
-        msg='skipping ai data send (buff2server wr) due to stale aichannels data, reg '+val_reg # debug
+        msg='skipping ai data send (buff2server wr) due to stale aichannels data, mba '+str(mba)+', reg '+val_reg # debug
         syslog(msg) # incl syslog
         print(msg)
         return 1
@@ -1544,22 +1556,22 @@ def read_counters(): # counters, usually 32 bit / 2 registers.
                             try:
                                 if wcount == 2: # normal counter
                                     #client.write_registers(address=regadd, values=[value&4294901760,value&65535], unit=mba) # f.code 0x10 unsupported!
-                                    client.write_register(address=regadd, value=(value&4294901760)/65536, unit=mba) # 0x10 not yet supported! set one by one.
+                                    client.write_register(address=regadd, value=((value&0xFFFF0000)>>8), unit=mba) # 0x10 not yet supported! set one by one.
                                     time.sleep(0.1)
-                                    client.write_register(address=regadd+1, value=(value&65535), unit=mba) # 0x10 not yet supported!
+                                    client.write_register(address=regadd+1, value=(value&0xFFFF), unit=mba) # 0x10 not yet supported!
                                     time.sleep(0.1)
                                 else:
                                     if wcount == -2: # barionet counter, MSW must be written first
                                         #client.write_registers(address=regadd, values=[value&65535, value&4294901760], unit=mba) # f.code 0x10 not yet supported!
                                         client.write_register(address=regadd, value=(value&65535), unit=mba)
                                         time.sleep(0.1)
-                                        client.write_register(address=regadd+1, value=(value&4294901760)/65536, unit=mba) # which one first for barionet?? chk this
+                                        client.write_register(address=regadd+1, value=((value&0xFFFF0000)>>8), unit=mba) # which one first for barionet?? chk this
                                         time.sleep(0.1)
                                     else:
                                         print('illegal counter configuration!',mba,regadd,wcount)
                             except:  # restore failed
                                 MBerr[mba]=MBerr[mba]+1
-                                msg='failed restoring counter register'+str(mba)+'.'+str(regadd)
+                                msg='failed restoring counter register '+str(mba)+'.'+str(regadd)
                                 syslog(msg)
                                 print(msg)
                                 traceback.print_exc()
@@ -1574,7 +1586,7 @@ def read_counters(): # counters, usually 32 bit / 2 registers.
 
                     except: # register read failed, respcode>0
                         MBerr[mba]=MBerr[mba]+1
-                        msg='failed reading counter register'+str(mba)+'.'+str(regadd)
+                        msg='failed reading counter register '+str(mba)+'.'+str(regadd)
                         syslog(msg)
                         print(msg)
                         traceback.print_exc()
@@ -1669,8 +1681,12 @@ def report_setup(): # send setup variables from setup table to server via buff2s
             # starmani osa ####
             if val_reg == 'S200': # air out setpoint temp
                 if reg_val != '0' and reg_val != '':
-                    Tairout_setpoint=int(float(reg_val)) # in ddeg
-                
+                    #Tairout_setpoint=int(float(reg_val)) # in ddeg
+                    Tairin_setpoint=int(float(reg_val)) # in ddeg, ikka S200
+                    msg='Tairin_setpoint set to '+str(Tairin_setpoint)
+                    print(msg)
+                    syslog(msg)
+                    #Tairin_bias=int(float(reg_val)) # -20 tahendab 2 kraadi alla valjatombe EI TEE NII!
                 setup2pid() # seadistusmuutujad starmani jaoks sisse
             #####
             
@@ -2463,7 +2479,7 @@ def restore_counter(register,value,counter_row): # counter volumes to be restore
             #print('restore_counter(): trying to match member '+str(memb+1)) # debug 
             #for w in range(wcount): # possible future improvement, for counter word length above 2
             if memb+1 == member: # member numbering in counters table start from 1, not 0
-                value=int((int(float(values[memb])*(x2/y2))&4294901760)/65536)
+                value=int((int(round(float(values[memb])*(x2/y2)))&0xFFFF0000)>>8) # dec 4294901760
                 msg='restore_counter() word value '+str(value)+' to be written into mba '+str(mba)+' regadd '+str(regadd)
                 print(msg)
                 syslog(msg)
@@ -2554,6 +2570,7 @@ def set_aivalue(svc,member,value): # sets variables like setpoints or limits to 
     Cmd3="BEGIN IMMEDIATE TRANSACTION" # conn3
     conn3.execute(Cmd3)
     Cmd3="update aichannels set value='"+str(value)+"' where val_reg='"+svc+"' and member='"+str(member)+"'"
+    #print(Cmd3) # debug
     try:
         conn3.execute(Cmd3)
         conn3.commit()
@@ -2605,6 +2622,7 @@ def set_aosvc(svc,member,value): # to set a readable output channel by the servi
 
     
 def get_setupvalue(register): # return one value in setup table. transaktsiooni pole vaja...
+    msg=''
     Cmd4="select value from setup where register='"+register+"'"
     #print(Cmd4) # debug
     cursor4.execute(Cmd4)
@@ -2612,11 +2630,16 @@ def get_setupvalue(register): # return one value in setup table. transaktsiooni 
     for row in cursor4: # should be one row only
         value=row[0]
     conn4.commit() # asetup database
-    #print('get_setupvalue: ',register,value) # debug
+    if value == '':
+        msg='no setup value '+register+'! using 0 instead!'
+        value='0'
+    print(msg) # debug
+    syslog(msg)
     return value
 
 
 def setup2pid(): # execute when setup was modified or read
+    msg=''
     try:
         f1.setKp(float(get_setupvalue('S51'))) # need ei muutu pidevalt
         f1.setKi(float(get_setupvalue('S52')))
@@ -2630,12 +2653,18 @@ def setup2pid(): # execute when setup was modified or read
         f2.setMin(float(get_setupvalue('S64')))
         f2.setMax(float(get_setupvalue('S65')))
         
-        f3.setMinpulseLength(float(get_setupvalue('S71'))) # mootoriajam vee temp j.
-        f3.setMaxpulseLength(float(get_setupvalue('S72'))) # aga pumba kiirus mojub ka!
-        f3.setRunPeriod(float(get_setupvalue('S73'))) #
-        f3.setMotorTime(float(get_setupvalue('S74'))) # 
-        f3.setMinpulseError(float(get_setupvalue('S75'))) #
-        f3.setMaxpulseError(float(get_setupvalue('S76'))) #
+        f3.setKp(float(get_setupvalue('S81'))) # sp pumbakiiruse juht
+        f3.setKi(float(get_setupvalue('S82')))
+        f3.setKd(float(get_setupvalue('S83')))
+        f3.setMin(float(get_setupvalue('S84')))
+        f3.setMax(float(get_setupvalue('S85')))
+        
+        f4.setMinpulseLength(float(get_setupvalue('S71'))) # mootoriajam vee temp j.
+        f4.setMaxpulseLength(float(get_setupvalue('S72'))) # aga pumba kiirus mojub ka!
+        f4.setRunPeriod(float(get_setupvalue('S73'))) #
+        f4.setMotorTime(float(get_setupvalue('S74'))) # 
+        f4.setMinpulseError(float(get_setupvalue('S75'))) #
+        f4.setMaxpulseError(float(get_setupvalue('S76'))) #
         
     except:
         msg='pid: problem setting parameters to instances! '+str(sys.exc_info()[1])
@@ -2794,6 +2823,7 @@ ts_USBrun=0 # timestamp to start running usb
 W272_dict={} # power-on values for modbus slaves. mba:regvalue
 gsmbreak=0 # 1 if powerbreak ongoing, do bit 15
 ts_proxygot=ts
+vent_setpoint=50
 
 #from pymodbus.client.sync import ModbusTcpClient as ModbusClient
 #from pymodbus.client.sync import ModbusSerialClient as ModbusClient
@@ -2846,10 +2876,14 @@ from pid import * # PID and ThreeStep classes here are needed
 #from threestep import *
 f1=PID(P=5,I=1,D=0,min=180,max=300) # outer loop, valjund on sissepuhketemperatuur, piiratud, yhikud ddeg
 f2=PID(P=5,I=1,D=0,min=150,max=600) # middle loop, valjund on vee temperatuur, ddeg
-f3=ThreeStep(setpoint=200, motortime = 130, maxpulse = 10, maxerror = 100, minpulse =1 , minerror = 20, runperiod = 60) # kalorifeeri ajam, 2 deg tundetust
-Tairout_setpoint=220 # valjatombe etteandetemp, S200 tapsustab
+f3=PID(P=5,I=1,D=0,min=10,max=200)
+f4=ThreeStep(setpoint=0, motortime = 130, maxpulse = 10, maxerror = 2, minpulse = 2 , minerror = 0.5, runperiod = 60) # kalorifeeri ajam, pumbajuhtimise onlimit alusel
+Tairout_setpoint=220 # valjatombe etteandetemp, S200 tapsustab - seda ei kasuta tegelikult
+Tairin_setpoint=210 # S200 tapsustab, vt alusel enam ei juhi, radikakyte on tugevam
+Tairin_bias=0 # S200 tapsustab
 Tairwater_actual = None
 Tairwater_setpoint = None
+pump_onlimit=0 # pumbakiiruse piiramine lykkab 3T ventiili enda ees
 ###    
 
 
@@ -3054,7 +3088,7 @@ if stop == 0: # lock ok
             
             
     sendstring=array2regvalue(MBsta,'EXW',2) # adding EXW, EXS to sendstring based on MBsta[]
-    sendstring=sendstring+"UPV:0\nUPS:1\nTCW:?\n" # restoring traffic volume from server in case of restart. need to reset it in the beginning of the month.
+    sendstring=sendstring+"UPV:0\nUPS:1\nTCW:?\nEZV:?\n" # restoring traffic volume and energy count from server in case of restart. 
     udpsend(0,int(ts)) # version data  / no need for ack and deletion from buff2server
 
     sys.stdout.flush()
@@ -3212,7 +3246,7 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
                             if sregister[0] == 'W' or sregister[0] == 'B' or sregister[0] == 'S': # could be setup variable
                                 if change_setup(sregister,svalue) == 0: # successful change in memory, not in file yet!
                                     setup_change = 1 # flag the change
-                                    msg='setup changed, '+sregister+svalue
+                                    msg='setup changed to '+sregister+':'+svalue
                                     print(msg)
                                     syslog(msg)
                                     
@@ -3290,7 +3324,7 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
                 print(msg)
                 syslog(msg)
                 
-                TODO='VARLIST' # let's report the whole setup just in case due to change. not really needed.
+                TODO='VARLIST' # let's report the whole setup just in case due to change. does not happen?? 
                 
         else: # illegal udp msg
             msg="got illegal message (no id) from "+str(addr)+" at "+str(int(ts))+": "+data.replace('\n',' ')  # missing mac
@@ -3648,11 +3682,12 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
         # setbit_dochannels(bit, value, mba = 1, regadd = 0) # siin mitte veel teenuste kaudu, vaid otse. rauast soltuv ju...
         if Tairwater_actual != None and Tairwater_setpoint != None: # no data on first run
             print('--- starting pulsecontrol run')
-            pulsecontrol=f3.output(Tairwater_actual) # 3step motor control
-            if pulsecontrol[1]>0: # up
+            pulsecontrol=f4.output(pump_onlimit*(abs(Tairin_setpoint - Tairin_actual)/20)) # 3step motor control, inverteerituna (21.2.2014)
+            # lisaks mootori piiramises kiirusele arvets ka viga. kui viga (yle piiramise) pole, siis pole vaja ajamit liigutada.
+            if pulsecontrol[1]<0:  # >0: # up
                 setbit_dosvc('K2W',1,1) # svc,member,value
                 setbit_dosvc('K2W',2,0) # igaks juhuks, startimisel voib vaja olla....
-            elif pulsecontrol[1]<0: # dn
+            elif pulsecontrol[1]>0: # <0: # dn
                 setbit_dosvc('K2W',2,1) # svc,member,value
                 setbit_dosvc('K2W',1,0) # igaks juhuks, startimisel voib vaja olla....
             else:  # no pulse 
@@ -3702,11 +3737,14 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
         set_aivalue('T5W',2,Tairout_setpoint) # monitooringu perfdata hulka Tairout_setpoint, mis saadi setup lugemisel, S200
         set_aivalue('T8W',2,Tairout_setpoint) # monitooringu perfdata hulka
         
-        f1.setSetpoint(Tairout_setpoint) # set setpoint for outer loop, desired room temperature
+        #f1.setSetpoint(Tairout_setpoint) # set setpoint for outer loop, desired room temperature
         #print('test get_setupvalue reg S51, value',get_setupvalue('S51')) # debug
         
             
-        Tairin_setpoint=f1.output(Tairout_actual)[0] # pid control outer loop
+        #Tairin_setpoint=f1.output(Tairout_actual)[0] # pid control outer loop - vaklja jaetud 16.02.2014
+        #Tairin_setpoint=Tairout_actual + Tairin_bias # sissepuhke temp etteanne valjatombetemperatuuri ja S200 alusel
+        
+        Tairin_setpoint=float(get_setupvalue('S200')) # nii tihti poleks vaja lugeda, aga VARLIST ei toimi vist...
         set_aivalue('T6W',2,Tairin_setpoint) # monitooringu 
         set_aivalue('T8W',3,Tairin_setpoint) # monitooringu perfdata hulka
         
@@ -3717,38 +3755,35 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
         set_aivalue('T8W',5,Tairwater_setpoint) # monitooringu perfdata hulka
         
         f3.setSetpoint(Tairwater_setpoint) # etteanne mootorikeerajale veetemp, saadakse pid regulaatoritest
+        pumpout=f3.output(Tairwater_actual) # outputs tuple. 
+        pump_onlimit=pumpout[5] # onlimit -1..1 for pulsegeneration that is moved to more frequent execution above. 
+        pump_speed=int(round(pumpout[0])) # olgu int
         
-        #pulsecontrol=f3.output(Tairwater_actual) # pulsegeneration moved to more frequent execution above. 
-        # pulsecontrol kasutus olgu laia surnud tsooniga, et enamasti saaks hakkama sujuvama pumbakiiruse reguleerimisega
-        
-        msg='pid setpoints: f1 f3 f3 '+str(round(Tairout_setpoint))+', '+str(round(Tairin_setpoint))+', '+str(round(Tairwater_setpoint))+'\n'
-        msg=msg+'pid actuals: f1 f3 f3 '+str(Tairout_actual)+', '+str(Tairin_actual)+', '+str(Tairwater_actual)
+        msg='pid setpoints: f1 f2 f3 '+str(round(Tairout_setpoint))+', '+str(round(Tairin_setpoint))+', '+str(round(Tairwater_setpoint))+'\n'
+        msg=msg+'pid actuals: f1 f2 f3 '+str(Tairout_actual)+', '+str(Tairin_actual)+', '+str(Tairwater_actual)
         print(msg) 
         syslog(msg)
         
         #motor relay control via dichannels/dochannels will happen more frequently, see line 3572 or so
         
-        
-        # siia pumbajuhtimine kui vaja
-        # mba 3 voi 4 (kelder)
-        # reg 42 0001 on fix speed, 0000 on fix pressure
-        # reg 40 0009 start  0008 stop
-        # reg 1 0001..0064 speed or pressure 0..10% (alla min nii ei kuku!)
-        pump_speed=int(round(interpolate(Tairwater_setpoint,200,0,700,200))) # speed 100% = 200 # (x, x1, y1, x2, y2)
-        if pump_speed > 200:
-            pump_speed = 200
-        if pump_speed < 0:
-            pump_speed = 0
             
-        msg='pid: pump speed based on Tairwater_setpoint '+str(round(Tairwater_setpoint))+' interpolated to 0..200 is '+str(pump_speed) # debug
+        msg='pid: pump speed based on Tairwater_setpoint '+str(round(Tairwater_setpoint))+' is '+str(pump_speed)+', pump_onlimit '+str(pump_onlimit) # debug
         print(msg)
         syslog(msg)
         set_aovalue(pump_speed,3,1) # pump 1 (value,mba,reg)
         set_aovalue(round(0.9*pump_speed),4,1) # pump 2 (value,mba,reg)   90% ylemise kiirusest
         
-        
-        
-        
+        # vent juhtimine V2W liikmed 1 ja 2, esialgu yhtemoodi
+        vent_setpoint=float(get_setupvalue('S220')) # max kiirus 0xffff  voi pigem 0xfff0. s220 piirkond 0..100!
+        if vent_setpoint > 100:
+            vent_setpoint = 100
+        elif vent_setpoint <0:
+            vent_setpoint = 0 # tegelikult peaks min piiri kontrollima, aga hiljem.
+        set_aovalue(int(655.2*vent_setpoint),1,53249) # (value,mba,reg)
+        set_aovalue(int(655.2*vent_setpoint),2,53249) # (value,mba,reg)
+        msg='vent speed based on S220 is '+str(round(vent_setpoint))+'%, sent to reg 53249 as 655.2 times bigger value of mba 1 and 2' # debug
+        print(msg)
+        syslog(msg)
         
         
         #print 'MBoldsta, MBsta',MBoldsta,MBsta,'at',ts # report once in 5 seconds or so

@@ -8,6 +8,10 @@ PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
 CREATE TABLE aochannels(mba,regadd,bootvalue,value,ts,rule,desc,comment); -- one line per register bit (coil). 15 columns.  NO ts???
 
+INSERT INTO "aochannels" VALUES('1','53249','','65535','','','vent 1 speed','max fff0?'); -- vent 1
+INSERT INTO "aochannels" VALUES('2','53249','','65535','','','vent 2 speed',''); -- vent 2 starman
+-- vent reziimi maaravad reg 53505 (olgu 0001 modbus jaoks, 0 man jaoks) ja 53248 (wr 0002 joustab)
+
 INSERT INTO "aochannels" VALUES('3','1','','1','','','pump 1 speed','max 200'); -- tsirk pump 1 
 INSERT INTO "aochannels" VALUES('4','1','','1','','','pump 2 speed','max 200'); -- tsirk pump 2 starman
 
