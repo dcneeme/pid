@@ -15,6 +15,9 @@ INSERT INTO "aochannels" VALUES('2','53249','','65535','','','vent 2 speed','');
 INSERT INTO "aochannels" VALUES('3','1','','1','','','pump 1 speed','max 200'); -- tsirk pump 1 
 INSERT INTO "aochannels" VALUES('4','1','','1','','','pump 2 speed','max 200'); -- tsirk pump 2 starman
 
+INSERT INTO "aochannels" VALUES('9','110','','0','','','ajami impulss','max 4'); -- ajami juhtimine koos aichannels M1W
+INSERT INTO "aochannels" VALUES('9','111','','0','','','ajami impulss','max 4'); -- ajami juhtimine koos aichannels M1W
+
 CREATE UNIQUE INDEX do_mbareg on 'aochannels'(mba,regadd); -- you need to put a name to the channel even if you do not plan to report it
 
 -- the rule number column is provided just in case some application needs them. should be uniquely indexed!

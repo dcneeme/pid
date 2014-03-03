@@ -41,8 +41,11 @@ INSERT INTO "dichannels" VALUES('9','1','15','PWS','1','0','0','0','1','1','',''
 INSERT INTO "dichannels" VALUES('9','0','8','K1W','1','17','0','0','1','0','','','D01','',0); -- niisutus
 INSERT INTO "dichannels" VALUES('9','0','9','K1W','2','17','0','0','1','0','','','D02','',0); -- jahutus
 
-INSERT INTO "dichannels" VALUES('9','0','10','K2W','1','17','0','0','1','0','','','D03','',0); -- 3tee ventiili ajam up
-INSERT INTO "dichannels" VALUES('9','0','11','K2W','2','17','0','0','1','1','','','DO4','',0); -- 3tee ventiili ajam dn
+-- INSERT INTO "dichannels" VALUES('9','151','10','K2W','1','17','0','0','1','0','','','D03','',0); -- 3tee ventiili ajam up tegeliku valjundi jargi
+-- INSERT INTO "dichannels" VALUES('9','151','11','K2W','2','17','0','0','1','1','','','DO4','',0); -- 3tee ventiili ajam dn tegeliku valjundi jargi
+-- INSERT INTO "dichannels" VALUES('9','0','10','K2W','1','17','0','0','1','0','','','D03','',0); -- 3tee ventiili ajam up
+-- INSERT INTO "dichannels" VALUES('9','0','11','K2W','2','17','0','0','1','1','','','DO4','',0); -- 3tee ventiili ajam dn
+
 
 INSERT INTO "dichannels" VALUES('9','0','12','K3W','1','17','0','0','1','0','','','D05','',0); -- moodaviigu 3step ajam up
 INSERT INTO "dichannels" VALUES('9','0','13','K3W','2','17','0','0','1','1','','','DO6','',0); -- moodaviigu 3step ajam dn

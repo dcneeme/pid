@@ -4,7 +4,7 @@
 # 3) listening commands and new setup values from the central server; 4) comparing the dochannel values with actual do values in dichannels table and writes to eliminate  the diff.
 # currently supported commands: REBOOT, VARLIST, pull, sqlread, run
 
-APVER='channelmonitor_starman.py 21.02.2014'  # linux and python3 -compatible. for STARMAN only.
+APVER='channelmonitor_starman.py 03.03.2014'  # linux and python3 -compatible. for STARMAN only.
 
 # 23.06.2013 based on channelmonitor3.py
 # 25.06.2013 added push cmd, any (mostly sql or log) file from d4c directory to be sent into pyapp/mac on itvilla.ee, this SHOULD BE controlled by setup.sql - NOT YET!
@@ -68,9 +68,13 @@ APVER='channelmonitor_starman.py 21.02.2014'  # linux and python3 -compatible. f
 # 18.02.2014 ajami nihutamine mootori onlimit alusel, f4 actualiks, sp=0, minerror 0.5.  S200 juhib sissepuhet alla valjatombe. seda voiks saada ajas nihutada. gcal?
 # 21.02.2014 added reading input registers for aichannels, based on type. pump_onlinmit alusel ajami juhtimine korda, f4 minerror olgu alla 1!
   #  kontrolli ai-ai sync suhet inout registritega, kui sama adr 3.1 4.1 holding ja input!!! esialgu kommenteerisin valja rohuvahe
-  
+# 01.03.2014 added gcal import into calendars table from json. is TODO execution still alive??
+# 02.03.2014 single read_ai_channels(svc) read not to waste time on all of the registers in pumps and ventilators. added pulsecontrol delay on boot.
+# 03.03.2014 dealing w oscillations and onlimit exceptions related to f4-pulses
+
 # PROBLEMS and TODO
-# LISA MBERR DICT, pymodbus client close vaid siis kui koikide mba-dega jama
+# calendar chk to often, with ana!
+# LISA MBERR DICT, pymodbus client close vaid siis kui koikide mba-dega jama. praegu max mba = 9! 
 # inserting to sent2server has problems. skipping it for now, no local log therefore.
 
 
@@ -482,7 +486,7 @@ def write_aochannels(): # synchronizes AI registers with data in aochannels tabl
         #print "Cmd3=",Cmd3
         cursor3.execute(Cmd3)
 
-        for row in cursor3: # got mba, regadd and value for coils that need to be updated / written
+        for row in cursor3: # got mba, regadd and value for registers that need to be updated / written
             regadd=0
             mba=0
 
@@ -491,10 +495,10 @@ def write_aochannels(): # synchronizes AI registers with data in aochannels tabl
             if row[1] != '':
                 regadd=int(row[1]) # must be a number
             if row[1] != '':
-                value=int(row[2]) # 0 or 1 to be written
+                value=int(float(row[2])) # komaga nr voib olla, teha int!
             msg='write_aochannels: going to write value '+str(value)+' to register mba.regadd '+str(mba)+'.'+str(regadd) 
-            print(msg)
-            syslog(msg)
+            #print(msg) # debug
+            #syslog(msg)
 
             try:
                 client.write_register(address=regadd, value=value, unit=mba)
@@ -511,15 +515,15 @@ def write_aochannels(): # synchronizes AI registers with data in aochannels tabl
                 if respcode ==2:
                     print('problem with coil',mba,regadd,value,'writing!')
 
-        conn3.commit()  # dicannel-bits transaction end
-
+        conn3.commit()  #  transaction end - why?
+        return 0
     except:
-        print('problem with aochannel - aichannel sync!')
-        syslog('problem with aochannel - aichannel sync!')
+        msg='problem with aochannel - aichannel sync!'
+        print(msg)
+        syslog(msg)
+        traceback.print_exc()
         sys.stdout.flush()
-
-    conn3.commit() # transaction end, perhaps not even needed - 2 reads, no writes...
-    return 0
+        return 1
     # write_aochannels() end. FRESHENED DICHANNELS TABLE VALUES AND CGH BITS (0 TO SEND, 1 TO PROCESS)
 
     
@@ -583,7 +587,7 @@ def write_dochannels(): # synchronizes DO bits (output channels) with data in do
                 if respcode ==2:
                     print('problem with coil',mba,regadd,value,'writing!')
 
-        #conn3.commit()  # dicannel-bits transaction end
+        #conn3.commit()  
 
     except:
         print('problem with dochannel grp select!')
@@ -645,21 +649,6 @@ def write_dochannels(): # synchronizes DO bits (output channels) with data in do
             for regadd in reg_dict.keys(): # chk all output registers defined in dochannels table
                 
                 word=client.read_holding_registers(address=regadd, count=1, unit=mba).registers[0] # find the current output word to inject the bitwise changes
-                
-                #if regadd == 0: # for do W272_dict member defines initial state according to mba
-                #    try:
-                #        word=W272_dict[mba] # power-up value
-                #        #print('power up setup for mba',mba,format("%04x" % word)) # debug 
-                #    except:
-                #        msg='power up state for mba '+str(mba)+' NOT SET! chk reg 272'
-                #        syslog(msg)
-                #        print(msg)
-                #        traceback.print_exc()
-                #else:
-                #    #print('output regadd for mba',regadd,mba) #debug
-                #    word = 0 # not DO register
-                # 
-                
                 print('value of the output',mba,regadd,'before change',format("%04x" % word)) # debug
                 
                 for bit in bit_dict.keys():
@@ -711,8 +700,9 @@ def write_dochannels(): # synchronizes DO bits (output channels) with data in do
     
 
 
-def read_aichannels(): # analogue inputs via modbusTCP, to be executed regularly (about 1..3 s interval). do not send here.
+def read_aichannels(svc = ''): # analogue inputs via modbusTCP, to be executed regularly (about 1..3 s interval). updates aichannels table.
     #if input register instead of holding, use fc04 = client.read_input_...  based on bit value 8 in aichannels.type
+    #if svc (val_reg) given as parameter, read only members of that svc
     locstring="" # local
     global inumm,ts,ts_inumm,mac,tcpdata, tcperr
     mba=0 # lokaalne siin
@@ -728,7 +718,10 @@ def read_aichannels(): # analogue inputs via modbusTCP, to be executed regularly
         Cmd3="BEGIN IMMEDIATE TRANSACTION" # conn3, kogu selle teenustegrupiga (aichannels) tegelemine on transaction
         conn3.execute(Cmd3)
 
-        Cmd3="select val_reg,count(member) from aichannels group by val_reg"
+        if svc != '':
+            Cmd3="select val_reg,count(member) from aichannels where val_reg='"+svc+"'" # only read one service members
+        else:
+            Cmd3="select val_reg,count(member) from aichannels group by val_reg"
         cursor3.execute(Cmd3)
 
         for row in cursor3: # services
@@ -848,7 +841,7 @@ def read_aichannels(): # analogue inputs via modbusTCP, to be executed regularly
                             value=0
                             status=3 # not to be sent status=3! or send member as NaN?
 
-                        print(msg) # temporarely off SIIN YTLEB RAW LUGEMI AI jaoks
+                        #print(msg) # temporarely off SIIN YTLEB RAW LUGEMI AI jaoks
                         syslog(msg)
 
                     except: # else: # failed reading register, respcode>0
@@ -887,7 +880,7 @@ def read_aichannels(): # analogue inputs via modbusTCP, to be executed regularly
                     if (cfg&3) == 3: # not to be sent, unknown
                         status=3
                         block=block+1 # error count incr
-                    print(val_reg,'status due to below low',status) # debug
+                    #print(val_reg,'status due to below low',status) # debug
                 else: # back with hysteresis 5%
                     if value<outhi and value>outlo+0.05*(outhi-outlo):
                         status=0 # back to normal
@@ -930,10 +923,10 @@ def read_aichannels(): # analogue inputs via modbusTCP, to be executed regularly
 
 
 
-def make_aichannels(): # send the ai service messages to the monitoring server (only if fresh enough, not older than 2xappdelay)
+def make_aichannels(svc = ''): # send the ai service messages to the monitoring server (only if fresh enough, not older than 2xappdelay). all or just one svc.
     locstring="" # local
     global inumm,ts,ts_inumm,mac,tcpdata, tcperr, udpport,appdelay
-    mba=0 # lokaalne siin
+    mba=0 # lokaalne
     val_reg=''
     desc=''
     comment=''
@@ -946,7 +939,10 @@ def make_aichannels(): # send the ai service messages to the monitoring server (
         conn3.execute(Cmd3)
         conn1.execute(Cmd3) # buff2server
 
-        Cmd3="select val_reg,count(member) from aichannels group by val_reg"
+        if svc == '':  # all services
+            Cmd3="select val_reg,count(member) from aichannels group by val_reg"
+        else: # just one
+            Cmd3="select val_reg,count(member) from aichannels where val_reg='"+svc+"'"
         cursor3.execute(Cmd3)
 
         for row in cursor3: # services
@@ -1062,7 +1058,7 @@ def make_aichannel_svc(val_reg,sta_reg):  # make a single service record based o
         if ostatus>status: # teenuseliikme status arvesse. aga kes muudab liikmete staatust? update, cfg alusel!
             status=ostatus
         if status>3:
-            msg='make_aichannels_svs() invalid status '+str(status)
+            msg='make_aichannels_svc() invalid status '+str(status)
             print(msg)
             syslog(msg)
 
@@ -1102,22 +1098,14 @@ def read_dichannel_bits(mba): # binary inputs, bit changes to be found and value
         Cmd3="BEGIN IMMEDIATE TRANSACTION" # conn3
         conn3.execute(Cmd3) #
 
-        #Cmd3="select mba,regadd from dichannels group by mba,regadd" # finding di registers to read. usually 1 reg per mb slave.
         Cmd3="select regadd from dichannels where mba='"+str(mba)+"'"  # for one slave only
         cursor3.execute(Cmd3)
 
         for row in cursor3: # for each mba and regadd (DI register)
             regadd=0
-            #mba=0
-
-            #if row[0] != '':
-            #    mba=int(row[0]) # must be number
-            #if row[1] != '':
-            #    regadd=int(row[1]) # must be number
             if row[0] != '':
                 regadd=int(row[0]) # must be number
 
-            #mcount=int(row[1])
             if val_reg != val_reg[:-1]+"S": #  only if val_reg does not end with S!
                 sta_reg=val_reg[:-1]+"S"
             else:
@@ -1132,9 +1120,9 @@ def read_dichannel_bits(mba): # binary inputs, bit changes to be found and value
                     MBerr[mba]=0
                 #print ', result',format("%04x" % tcpdata)
             except:
-                #msg='di register '+str(mba)+'.'+str(regadd)+' read FAILURE! no sql update! '+str(sys.exc_info()[1])  # debug
-                #print(msg) # debug
-                #syslog(msg) # debug
+                msg='di register '+str(mba)+'.'+str(regadd)+' read FAILURE! no sql update! '+str(sys.exc_info()[1])  # debug
+                print(msg) # debug
+                syslog(msg) # debug
                 #traceback.print_exc() # debug
                 return 1
 
@@ -1157,7 +1145,6 @@ def read_dichannel_bits(mba): # binary inputs, bit changes to be found and value
                     # check if outputs must be written
                     if value != ovalue: # change detected, update dichannels value, chg-flag  - saaks ka maski alusel!!!
                         chg=3 # 2-bit change flag, bit 0 to send and bit 1 to process, to be reset separately
-                        #ichg=ichg+2**bit # adding up into the change mask
                         msg='DIchannel '+str(mba)+'.'+str(regadd)+' bit '+str(bit)+' change! was '+str(ovalue)+', became '+str(round(value)) # temporary
                         print(msg)
                         syslog(msg)
@@ -1179,18 +1166,15 @@ def read_dichannel_bits(mba): # binary inputs, bit changes to be found and value
                 return 1
 
             msg='dichannel register mba.regadd '+str(mba)+'.'+str(regadd)+' read success, value 0x'+format("%04x" % tcpdata)
-            #if mba == 255:
-            #    print(msg) # temporary debug
+            
         conn3.commit()  # dichannel-bits transaction end
 
         return 0
 
     except: # Exception,err:  # python3 ei taha seda viimast
-        #syslog('err: '+repr(err))
         msg='there was a problem with dichannels data reading or processing! '+str(sys.exc_info()[1])
         syslog(msg)
         print(msg)
-        #traceback.print_exc()
         #traceback.print_exc()
         time.sleep(1)
         return 1
@@ -1233,10 +1217,12 @@ def make_dichannels(): # di services into to-be-sent buffer table BUT only when 
             ts_last=int(row[2]) # last reporting time
             if chg == 1: # message due to bichannel state change
                 msg='DI service to be reported due to change: '+val_reg
-            else:
-                msg='DI service '+val_reg+' to be REreported, last reporting was '+str(ts-ts_last)+' s ago' # , ts now=',ts
-            print(msg)
-            syslog(msg)
+                print(msg)
+                syslog(msg)
+            #else:
+                #pass
+                #msg='DI service '+val_reg+' to be REreported, last reporting was '+str(ts-ts_last)+' s ago' # , ts now=',ts
+            
             #mcount=int(row[1]) # changed service member count
             sta_reg=val_reg[:-1]+"S" # service status register name
 
@@ -1341,7 +1327,7 @@ def make_dichannel_svc(val_reg,sta_reg,chg):    # ONE service compiling and buff
         #dichannels table update with new chg ja status values. no changes for values! chg bit 0 off! set ts_msg!
         Cmd3="UPDATE dichannels set status='"+str(status)+"', ts_msg='"+str(int(ts))+"', chg='"+str(chg&2)+"' where val_reg='"+val_reg+"' and member='"+str(member)+"'"
         # bit0 from change flag stripped! this is to notify that this service is sent (due to change). may need other processing however.
-        #print Cmd3 # di reporting debug
+        #print(Cmd3) # di reporting debug
         conn3.execute(Cmd3) # kirjutamine
 
 
@@ -1515,10 +1501,8 @@ def read_counters(): # counters, usually 32 bit / 2 registers.
 
                         if avg>1 and abs(value-ovalue)<value/2:  # averaging the readings. big jumps (more than 50% change) are not averaged.
                             value=int(((avg-1)*ovalue+value)/avg) # averaging with the previous value, works like RC low pass filter
-                            print(', avg on, counter value',value) # ,'rawdiff',abs(raw-oraw),'raw/2',raw/2
-                        else:
-                            print(', no avg, counter value becomes',value)
-
+                            print('counter avg on, value became ',value) # why?
+                        
 
                         # check limits and set statuses based on that
                         # returning to normal with hysteresis, take previous value into account
@@ -1545,7 +1529,7 @@ def read_counters(): # counters, usually 32 bit / 2 registers.
                             if value>outlo+0.05*(outhi-outlo):
                                 status=0 # normal again
 
-                        print('status for counter svc',val_reg,status,'due to cfg',cfg,'and value',value,'while limits are',outlo,outhi) # debug
+                        #print('status for counter svc',val_reg,status,'due to cfg',cfg,'and value',value,'while limits are',outlo,outhi) # debug
 
                         #if value<ovalue and ovalue < 4294967040: # this will restore the count increase during comm break
                         if value == 0 and ovalue >0: # possible pic reset. perhaps value <= 100?
@@ -1641,7 +1625,7 @@ def read_devices(): # read master io address (for a start) from devices table. W
 
 def report_setup(): # send setup variables from setup table to server via buff2server table
     locstring="" # local
-    global inumm,ts,ts_inumm,mac,host,udpport,TODO,sendstring,W272_dict,loghost,logport,logaddr,Tairout_setpoint
+    global inumm,ts,ts_inumm,mac,host,udpport,TODO,sendstring,loghost,logport,logaddr,Tairout_setpoint
     mba=0 # lokaalne siin
     reg=''
     reg_val=''
@@ -1674,22 +1658,6 @@ def report_setup(): # send setup variables from setup table to server via buff2s
             reg_val=row[1] # string even if number!
             print(' setup row: ',val_reg,reg_val)
 
-            if val_reg[0] == 'W' and '272' in val_reg: # power up value for do (setup register W1.272 and so on)
-                W272_dict.update({int(float(val_reg[1])) : int(float(reg_val))}) # {mba:272value}
-                print ('updated W272_dict, became',W272_dict)
-                
-            # starmani osa ####
-            if val_reg == 'S200': # air out setpoint temp
-                if reg_val != '0' and reg_val != '':
-                    #Tairout_setpoint=int(float(reg_val)) # in ddeg
-                    Tairin_setpoint=int(float(reg_val)) # in ddeg, ikka S200
-                    msg='Tairin_setpoint set to '+str(Tairin_setpoint)
-                    print(msg)
-                    syslog(msg)
-                    #Tairin_bias=int(float(reg_val)) # -20 tahendab 2 kraadi alla valjatombe EI TEE NII!
-                setup2pid() # seadistusmuutujad starmani jaoks sisse
-            #####
-            
             if val_reg == 'S514': # syslog ip address
                 if reg_val == '0.0.0.0' or reg_val == '':
                     loghost='255.255.255.255' # broadcast
@@ -2095,7 +2063,7 @@ def push(filename): # send (gzipped) file to supporthost
 
 
 
-def pull(filename,filesize,start): # uncompressing too if filename contains .gz and succesfully retrieved. start=0 normally. higher with resume.
+def pull(filename,filesize,start): # download and uncompress too if filename contains .gz and succesfully retrieved. start=0 normally. higher with resume.
     global SUPPORTHOST,TCW #
     print('trying to retrieve file '+SUPPORTHOST+'/'+filename+' from byte '+str(start))
     oksofar=1 # success flag
@@ -2561,7 +2529,7 @@ def get_aivalue(svc,member): # returns raw,value,lo,hi,status values based on se
         syslog(msg)
     
     conn3.commit()
-    print('get_aivalue ',svc,member,'value,outlo,outhi,status',value,outlo,outhi,status) # debug
+    #print('get_aivalue ',svc,member,'value,outlo,outhi,status',value,outlo,outhi,status) # debug
     return value,outlo,outhi,status
 
 
@@ -2684,7 +2652,71 @@ def interpolate(x, x1, y1, x2, y2): # tuleks siit valja viia, esineb pid.py Thre
             return None
 
             
-# ### procedures end ############################################
+def get_calendar(mac, days = 3): # query to SUPPORTHOST, returning txt. started by cmd:GCAL too for testing
+    # example:   http://www.itvilla.ee/cgi-bin/gcal.cgi?mac=000101000001&days=10
+    req = 'http://www.itvilla.ee/cgi-bin/gcal.cgi?mac='+mac+'&days='+str(days)+'&format=json'
+    headers={'Authorization': 'Basic YmFyaXg6Y29udHJvbGxlcg=='} # Base64$="YmFyaXg6Y29udHJvbGxlcg==" ' barix:controller
+    msg='starting gcal query '+req
+    print(msg) # debug
+    try:
+        response = requests.get(req, headers = headers)
+    except:
+        msg='gcal query '+req+' failed!'
+        traceback.print_exc()
+        print(msg)
+        syslog(msg)
+        return 1
+
+    events = eval(response.content) # string to list
+    #print(repr(events)) # debug
+    Cmd4 = "BEGIN IMMEDIATE TRANSACTION"
+    try:
+        conn4.execute(Cmd4)
+        Cmd4="delete from calendar"
+        conn4.execute(Cmd4)
+        for event in events:
+            #print('event',event) # debug
+            columns=str(list(event.keys())).replace('[','(').replace(']',')')
+            values=str(list(event.values())).replace('[','(').replace(']',')')
+            #columns=str(list(event.keys())).replace('{','(').replace('}',')') 
+            #values=str(list(event.values())).replace('{','(').replace('}',')')
+            Cmd4 = "insert into calendar"+columns+" values"+values
+            #print(Cmd4) # debug
+            conn4.execute(Cmd4)
+        conn4.commit()
+        msg='calendar table updated'
+        print(msg)
+        syslog(msg)
+        return 0
+    except:
+        msg='delete + insert to calendar table failed!'
+        print(msg)
+        syslog(msg)
+        traceback.print_exc() # debug
+        return 1
+        
+        
+def chk_calevents(title = ''): # set a new setpoint if found in table calendar (sharing database connection with setup)
+    global ts
+    value='' # local string value
+    if title == '':
+        return None
+    
+    Cmd4 = "BEGIN IMMEDIATE TRANSACTION"
+    try:
+        conn4.execute(Cmd4)
+        Cmd4="select value from calendar where title='"+title+"' and timestamp+0<"+str(ts)+" order by timestamp asc" # find the last passed event value
+        cursor4.execute(Cmd4)
+        for row in cursor4:
+            value=row[0] # overwrite with the last value before now
+        conn4.commit()
+        return value # can be empty string too, then use default value for setpoint related to title
+    except:
+        traceback.print_exc()
+        return None
+
+
+### procedures end ############################################
 
 
 
@@ -2748,9 +2780,9 @@ UDPlogSock = socket(AF_INET,SOCK_DGRAM)
 UDPlogSock.settimeout(None) # using for syslog messaging
 UDPlogSock.setsockopt(SOL_SOCKET, SO_BROADCAST, 1) # et broadcast lubada
 
-appdelay=30 # 120 # 1s appmain execution interval, reporting all analogue values and counters. NOT DI channels!!
+appdelay=60 # 30 # 120 # 1s appmain execution interval, reporting all analogue values and counters. NOT DI channels!!
 
-retrydelay=5 # after 5 s resend is possible if row still in buffer
+retrydelay=10 #5 # after 5 s resend is possible if row still in buffer
 renotifydelay=240 # send again the DI values after that time period even if not changed. but the changed di and do values are sent immediately!
 
 sendstring="" # datagram to be sent
@@ -2768,7 +2800,7 @@ setup_change=0 # flag setup change
 respcode=0 # return code  0=ok, 1=tmp failure, 2=lost socket
 tcpconnfail=0 # flag about proxy conn
 ts_interval1=0 # timestamp of trying to restore modbuysproxy conn interval 1
-interval1delay=5 # try to restore modbusproxy connection once in this time period if conn lost
+interval1delay=15 # 5 # try to restore modbusproxy connection once in this time period if conn lost
 stop=0 # reboot flag
 LOG=sys.argv[0].replace('.py','.log') # should appear in the current directory
 filename='' # for pull()
@@ -2820,10 +2852,10 @@ BattPlugged=0
 BattHealth=0
 BattCharge=0
 ts_USBrun=0 # timestamp to start running usb
-W272_dict={} # power-on values for modbus slaves. mba:regvalue
+#W272_dict={} # power-on values for modbus slaves. mba:regvalue
 gsmbreak=0 # 1 if powerbreak ongoing, do bit 15
 ts_proxygot=ts
-vent_setpoint=50
+vent_setpoint=50 # kuni kalender paika paneb voi defaulti kukub
 
 #from pymodbus.client.sync import ModbusTcpClient as ModbusClient
 #from pymodbus.client.sync import ModbusSerialClient as ModbusClient
@@ -2853,7 +2885,7 @@ addr = (host,udpport) # itself
 import sqlite3
 conn1tables=['buff2server']
 conn3tables=['aichannels','dichannels','dochannels','counters','chantypes','devices','aochannels']
-conn4tables=['setup']
+conn4tables=['setup','calendar']
 try:
     conn1= sqlite3.connect(':memory:')  # conn1 = sqlite3.connect('./buff2server',2) # buffer data from modbus registers, unsent or to be resent
     conn3= sqlite3.connect(':memory:')  # sqlite3.connect('./modbus_channels',2) # modbus register related tables / sometimes locked!!
@@ -2879,7 +2911,7 @@ f2=PID(P=5,I=1,D=0,min=150,max=600) # middle loop, valjund on vee temperatuur, d
 f3=PID(P=5,I=1,D=0,min=10,max=200)
 f4=ThreeStep(setpoint=0, motortime = 130, maxpulse = 10, maxerror = 2, minpulse = 2 , minerror = 0.5, runperiod = 60) # kalorifeeri ajam, pumbajuhtimise onlimit alusel
 Tairout_setpoint=220 # valjatombe etteandetemp, S200 tapsustab - seda ei kasuta tegelikult
-Tairin_setpoint=210 # S200 tapsustab, vt alusel enam ei juhi, radikakyte on tugevam
+Tairin_setpoint=200 # S200 tapsustab, vt alusel enam ei juhi, radikakyte on tugevam
 Tairin_bias=0 # S200 tapsustab
 Tairwater_actual = None
 Tairwater_setpoint = None
@@ -3009,15 +3041,6 @@ except: # lock active
 
 if stop == 0: # lock ok
     
-    #create sqlite connections (while located in sql_dir)
-    
-    # test if table setup is preset 
-    #Cmd='select * from setup'
-    #print(Cmd)
-    #cursor4.execute(Cmd)
-    #for row in cursor4:
-    #    print(repr(row))
-
     # delete unsent rows older than 60 s
     Cmd1="DELETE from buff2server where ts_created+0<"+str(ts)+"-60" # kustutakse koik varem kui ninute tagasi loodud
     conn1.execute(Cmd1)
@@ -3080,7 +3103,7 @@ if stop == 0: # lock ok
         msg='channelconfig() failure! giving up on try '+str(cfgnum)
     else:
         msg='channelconfig() success on try '+str(cfgnum)
-        MBsta=[0,0,0,0]
+        #MBsta=[0,0,0,0] # tegelikult hoopis 10 kohta ja varem defineeritud.
     print(msg)
     syslog(msg)
     sys.stdout.flush()
@@ -3118,7 +3141,7 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
         rdata,raddr = UDPSock.recvfrom(buf)
         data=rdata.decode("utf-8") # python3 related need due to mac in hex
         
-        #print('got from monitoring server',repr(raddr),repr(data)) # debug
+        print('got from monitoring server',repr(raddr),repr(data)) # debug
         
         TCW[0]=TCW[0]+len(data) # adding top the incoming UDP byte counter
 
@@ -3332,324 +3355,335 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
             syslog(msg)
             data='' # destroy received data
 
-    except:  # no new data in 0.1s waiting time
-        #print '.',  #currently no udp response data on input, printing dot
+    except:  # no new data in 0.1s waiting time # SIIA EI JOUAGI??
+        #pass
+        print('no new UDP.')  #currently no udp response data on input
         #traceback.print_exc() # debug
         
-        unsent()  # delete from buff2server the services that are unsent for too long (3*renotifydelay)
-
-        #something to do? chk udp communication first
-        if ts - ts_udpsent > 900: # no udp comm possible for some reason, try to reboot the device
-            TODO='FULLREBOOT' # send 255 666 dead or reboot on linux
-            msg='trying full reboot to restore monitoring connectivity'
-            syslog(msg) # log message to file
-            print(msg)
-            if OSTYPE == 'android':
-                droid.ttsSpeak(msg)
-                time.sleep(10)
-
-        if ts - ts_udpgot > 100: # no udp response 
-            print('last udp received',int(ts - ts_udpgot),' s ago') # debug
-            
-        ################
-        ################
-
-        
-                    
-        if ts - ts_udpgot > 1800: # for 30 min no response from udpserver
-            TODO='FULLREBOOT' # try if it helps. if send fails, after 300 s also full reboot
-            msg='trying full reboot to restore monitoring connectivity'
-            print(msg)
-            syslog(msg)
-            if OSTYPE == 'android':
-                droid.ttsSpeak(msg)
-                time.sleep(10)
-
-        if OSTYPE == 'android' and (ts - ts_proxygot > 400): # proxy maha surnud? siis tee fullreboot, MITTE REBOOT! # 300 OLI LIIGA VAHE, PARANES ISE KOHE PEALE SEDA
-            msg='going to full reboot due to proxy lost '+str(int(ts - ts_proxygot))+' seconds ago'
-            print(msg,ts,ts_proxygot)
-            syslog(msg) # ,ts,ts_proxygot)  # esialgu vaid 1 argument!
-            droid.ttsSpeak(msg)
-            time.sleep(1)
-            TODO = 'FULLREBOOT'
-            
     
-        if TODO != '': # yes, it seems there is something to do
-            todocode=todocode+1 # limit the retrycount
-            print('going to execute cmd',TODO)
-            
-            if TODO == 'VARLIST':
-                todocode=report_setup() # general setup from asetup/setup
-                todocode=todocode+report_channelconfig() # iochannels setup from modbus_channels/dichannels, aichannels, counters* - last ytd
-                if todocode == 0:
-                    print(TODO,'execution success')
-                    #TODO='' # do not do it here! see the if end
-                    
-            if TODO == 'REBOOT': # stop the application, not the system
-                if OSTYPE == 'android' and ProxyState != 0: # EI TOHI!!!! proxy voib maas olla
-                    todocode=1 # voimalik, et proxy surnud ja tuleks hoopis seda kaivitada
-                else:
-                    stop=1 
-                    todocode=0
-                    msg='stopping for script restart due to command'
-                    print(msg)
-                    syslog(msg) 
-                    sys.stdout.flush()
-                    if OSTYPE == 'android':
-                        droid.ttsSpeak(msg)
-                        time.sleep(10)
-                time.sleep(1)
+    #print('-- executing main loop stuff') # the part below will be executed on every loop (no only in case of no new input) since 01.02.1014
+    unsent()  # delete from buff2server the services that are unsent for too long (3*renotifydelay)
+    #print('-- unsent done') # debug
+    sys.stdout.flush()
+    #something to do? chk udp communication first
+    AppUptime=int(ts-ts_boot)
+    if ts - ts_udpsent > 900: # no udp comm possible for some reason, try to reboot the device
+        TODO='FULLREBOOT' # send 255 666 dead or reboot on linux
+        msg='trying full reboot to restore monitoring connectivity'
+        syslog(msg) # log message to file
+        print(msg)
+        if OSTYPE == 'android':
+            droid.ttsSpeak(msg)
+            time.sleep(10)
 
-            if TODO == 'WLANON':
-                todocode=0
-                msg='wireless on due to command'
-                print(msg)
-                syslog(msg) # log message to file
-                if OSTYPE == 'android':
-                    try:
-                        #print 'wifi state',droid.checkWifiState().result
-                        droid.toggleWifiState(True)
-                        todocode=0
-                        droid.ttsSpeak(msg)
-                        time.sleep(10)
+    if ts - ts_udpgot > 100: # no udp response 
+        print('last udp received',int(ts - ts_udpgot),' s ago') # debug
+        
+    ################
+    ################
 
-                    except:
-                        todocode=1
-
-            if TODO == 'WLANOFF':
-                todocode=0
-                msg='wireless off due to command'
-                print(msg)
-                syslog(msg) # log message to file
-                if OSTYPE == 'android':
-                    try:
-                        #print 'wifi state',droid.checkWifiState().result
-                        droid.toggleWifiState(False)
-                        todocode=0
-                        droid.ttsSpeak(msg)
-                        time.sleep(10)
-
-                    except:
-                        todocode=1
-
-            if TODO == 'WLAN?': # finding the state, true or false as dnsize
-                todocode=0
-                msg='checking wireless state due to command'
-                print(msg)
-                syslog(msg) # log message to file
-                if OSTYPE == 'android':
-                    try:
-                        dnsize=droid.checkWifiState().result
-                        print('wlan state',dnsize)
-                        todocode=0
-
-                    except:
-                        todocode=1
-                        
-            
+    
                 
-            if TODO.split(',')[0] == 'free': # finding the free MB and % of current or stated path, return values in ERV
-                free=[]
-                msg='checking free space due to command'
+    if ts - ts_udpgot > 1800: # for 30 min no response from udpserver
+        TODO='FULLREBOOT' # try if it helps. if send fails, after 300 s also full reboot
+        msg='trying full reboot to restore monitoring connectivity'
+        print(msg)
+        syslog(msg)
+        if OSTYPE == 'android':
+            droid.ttsSpeak(msg)
+            time.sleep(10)
+
+    if OSTYPE == 'android' and (ts - ts_proxygot > 400): # proxy maha surnud? siis tee fullreboot, MITTE REBOOT! # 300 OLI LIIGA VAHE, PARANES ISE KOHE PEALE SEDA
+        msg='going to full reboot due to proxy lost '+str(int(ts - ts_proxygot))+' seconds ago'
+        print(msg,ts,ts_proxygot)
+        syslog(msg) # ,ts,ts_proxygot)  # esialgu vaid 1 argument!
+        droid.ttsSpeak(msg)
+        time.sleep(1)
+        TODO = 'FULLREBOOT'
+        
+
+    if TODO != '': # yes, it seems there is something to do
+        todocode=todocode+1 # limit the retrycount
+        print('going to execute cmd',TODO)
+        
+        if TODO == 'GCAL':
+            todocode=get_calendar(mac) # check events from gcal
+            if todocode == 0:
+                print(TODO,'execution success')
+                
+        if TODO == 'VARLIST':
+            todocode=report_setup() # general setup from asetup/setup
+            todocode=todocode+report_channelconfig() # iochannels setup from modbus_channels/dichannels, aichannels, counters* - last ytd
+            if todocode == 0:
+                print(TODO,'execution success')
+                #TODO='' # do not do it here! see the if end
+                
+        if TODO == 'REBOOT': # stop the application, not the system
+            if OSTYPE == 'android' and ProxyState != 0: # EI TOHI!!!! proxy voib maas olla
+                todocode=1 # voimalik, et proxy surnud ja tuleks hoopis seda kaivitada
+            else:
+                stop=1 
+                todocode=0
+                msg='stopping for script restart due to command'
                 print(msg)
-                syslog(msg) # log message to file
-                try:
-                    free=free(TODO.split(',')[1]) # the parameter can be missing
-                    todocode=0
-                except:        
-                    todocode=1
-
-
-            if TODO == 'FULLREBOOT': # full reboot, NOT just the application. android as well!
-                #stop=1 # cmd:FULLREBOOT
-                try:
-                    msg='started full reboot due to command' # 
-                    syslog(msg)
-                    print(msg)
-                    if OSTYPE == 'android':
-                        droid.ttsSpeak(msg)
-                        time.sleep(10)
-                        returncode=subexec(['su','-c','reboot'],0) # 2 channels for rebooting
-                        todocode=0
-                    else: # LINUX
-                        print('going to reboot now!')
-                        returncode=subexec(['reboot'],0) # linux
-                        
-                except:
-                    todocode=1
-                    msg='full reboot failed at '+str(int(ts))
-                print(msg)
-                syslog(msg) # log message to file
-
-            if TODO == 'CONFIG': #
-                todocode=channelconfig() # configure modbus registers according to W... data in setup
-
-            if TODO == 'LOGCAT': #
+                syslog(msg) 
+                sys.stdout.flush()
                 if OSTYPE == 'android':
-                    todocode=logcat_dumpsend() # configure modbus registers according to W... data in setup
-                else:
-                    TODO="" # esialgu, kuni linuxile midagi aretada
-                    todocode=1
-                    
-            if TODO.split(',')[0] == 'pull':
-                print('going to pull') # debug
-                if len(TODO.split(',')) == 3: # download a file (with name and size given)
-                    filename=TODO.split(',')[1]
-                    filesize=int(TODO.split(',')[2])
+                    droid.ttsSpeak(msg)
+                    time.sleep(10)
+            time.sleep(1)
 
-                    if pulltry == 0: # first try
-                        pulltry=1 # partial download is possible, up to 10 pieces!
-                        startnum=0
-                        todocode=1 # not yet 0
-
-                    if pulltry < 10 and todocode >0: # NOT done yet
-                        if pulltry == 1: # there must be no file before the first try
-                            try:
-                                os.remove(filename+'.part')
-                            except:
-                                pass
-                        else: # second and so on try
-                            try:
-                                filepart=filename+'.part'
-                                startnum=os.stat(filepart)[6]
-                                msg='partial download size '+str(dnsize)+' on try '+str(pulltry)
-                            except:
-                                msg='got no size for file '+os.getcwd()+'/'+filepart+', try '+str(pulltry)
-                                startnum=0
-                                #traceback.print_exc()
-                            print(msg)
-                            syslog(msg)
-
-                        if pull(filename,filesize,startnum)>0:
-                            pulltry=pulltry+1 # next try will follow
-                            todocode=1
-                        else: # success
-                            pulltry=0
-                            todocode=0
-                else:
-                    todocode=1
-                    print('wrong number of parameters for pull')
-                    
-            if TODO.split(',')[0] == 'push': # upload a file (with name and passcode given)
+        if TODO == 'WLANON':
+            todocode=0
+            msg='wireless on due to command'
+            print(msg)
+            syslog(msg) # log message to file
+            if OSTYPE == 'android':
                 try:
-                    filename=TODO.split(',')[1]
-                    print('starting push with',filename)
-                    todocode=push(filename) # no automated retry here
-                except:
-                    msg='invalid cmd syntax for push'
-                    print(msg)
-                    syslog(msg)
-                    todocode=99
+                    #print 'wifi state',droid.checkWifiState().result
+                    droid.toggleWifiState(True)
+                    todocode=0
+                    droid.ttsSpeak(msg)
+                    time.sleep(10)
 
-            if TODO.split(',')[0] == 'sqlread':
-                if len(TODO.split(',')) == 2: # cmd:sqlread,aichannels (no extension for sql file!)
-                    tablename=TODO.split(',')[1]
-                    if '.sql' in tablename:
-                        msg='invalid parameters for cmd '+TODO
+                except:
+                    todocode=1
+
+        if TODO == 'WLANOFF':
+            todocode=0
+            msg='wireless off due to command'
+            print(msg)
+            syslog(msg) # log message to file
+            if OSTYPE == 'android':
+                try:
+                    #print 'wifi state',droid.checkWifiState().result
+                    droid.toggleWifiState(False)
+                    todocode=0
+                    droid.ttsSpeak(msg)
+                    time.sleep(10)
+
+                except:
+                    todocode=1
+
+        if TODO == 'WLAN?': # finding the state, true or false as dnsize
+            todocode=0
+            msg='checking wireless state due to command'
+            print(msg)
+            syslog(msg) # log message to file
+            if OSTYPE == 'android':
+                try:
+                    dnsize=droid.checkWifiState().result
+                    print('wlan state',dnsize)
+                    todocode=0
+
+                except:
+                    todocode=1
+                    
+        
+            
+        if TODO.split(',')[0] == 'free': # finding the free MB and % of current or stated path, return values in ERV
+            free=[]
+            msg='checking free space due to command'
+            print(msg)
+            syslog(msg) # log message to file
+            try:
+                free=free(TODO.split(',')[1]) # the parameter can be missing
+                todocode=0
+            except:        
+                todocode=1
+
+
+        if TODO == 'FULLREBOOT': # full reboot, NOT just the application. android as well!
+            #stop=1 # cmd:FULLREBOOT
+            try:
+                msg='started full reboot due to command' # 
+                syslog(msg)
+                print(msg)
+                if OSTYPE == 'android':
+                    droid.ttsSpeak(msg)
+                    time.sleep(10)
+                    returncode=subexec(['su','-c','reboot'],0) # 2 channels for rebooting
+                    todocode=0
+                else: # LINUX
+                    print('going to reboot now!')
+                    returncode=subexec(['reboot'],0) # linux
+                    
+            except:
+                todocode=1
+                msg='full reboot failed at '+str(int(ts))
+            print(msg)
+            syslog(msg) # log message to file
+
+        if TODO == 'CONFIG': #
+            todocode=channelconfig() # configure modbus registers according to W... data in setup
+
+        if TODO == 'LOGCAT': #
+            if OSTYPE == 'android':
+                todocode=logcat_dumpsend() # configure modbus registers according to W... data in setup
+            else:
+                TODO="" # esialgu, kuni linuxile midagi aretada
+                todocode=1
+                
+        if TODO.split(',')[0] == 'pull':
+            print('going to pull') # debug
+            if len(TODO.split(',')) == 3: # download a file (with name and size given)
+                filename=TODO.split(',')[1]
+                filesize=int(TODO.split(',')[2])
+
+                if pulltry == 0: # first try
+                    pulltry=1 # partial download is possible, up to 10 pieces!
+                    startnum=0
+                    todocode=1 # not yet 0
+
+                if pulltry < 10 and todocode >0: # NOT done yet
+                    if pulltry == 1: # there must be no file before the first try
+                        try:
+                            os.remove(filename+'.part')
+                        except:
+                            pass
+                    else: # second and so on try
+                        try:
+                            filepart=filename+'.part'
+                            startnum=os.stat(filepart)[6]
+                            msg='partial download size '+str(dnsize)+' on try '+str(pulltry)
+                        except:
+                            msg='got no size for file '+os.getcwd()+'/'+filepart+', try '+str(pulltry)
+                            startnum=0
+                            #traceback.print_exc()
                         print(msg)
                         syslog(msg)
-                        pulltry=88 # need to skip all tries below
-                    else:
-                        todocode=sqlread(tablename) # hopefully correct parameter (existing table, not sql filename)
-                        if tablename == 'setup' and todocode == 0: # table refreshed, let's use the new setup
-                            channelconfig() # possibly changed setup data to modbus registers
-                            report_setup() # let the server know about new setup
-                else: # wrong number of parameters
-                    todocode=1
-            
-            if TODO.split(',')[0] == 'RMLOG': # delete log files in working directory (d4c)
-                files=glob.glob('*.log')
-                try:
-                    for filee in files:
-                        os.remove(filee)
-                        todocode=0
-                except:
-                    todocode=1 # failure to delete *.log
-                    
-            # start scripts in parallel (with 10s pause in this channelmonitor). cmd:run,nimi,0 # 0 or 1 means bg or fore
-            # use background normally, the foreground process will open a window and keep it open until closed manually
-            if TODO.split(',')[0] == 'run':
-                if len(TODO.split(',')) == 3: # run any script in the d4c directory as foreground or background subprocess
-                    script=TODO.split(',')[1]
-                    if script in os.listdir('/sdcard/sl4a/scripts/d4c'): # file exists
-                        fore=TODO.split(',')[2] # 0 background, 1 foreground
-                        extras = {"com.googlecode.android_scripting.extra.SCRIPT_PATH":"/sdcard/sl4a/scripts/d4c/%s" % script}
-                        joru1="com.googlecode.android_scripting"
-                        joru2="com.googlecode.android_scripting.activity.ScriptingLayerServiceLauncher"
-                        if fore == '1': # see jatab akna lahti, pohiprotsess kaib aga edasi
-                            myintent = droid.makeIntent("com.googlecode.android_scripting.action.LAUNCH_FOREGROUND_SCRIPT", None, None, extras, None, joru1, joru2).result
-                        else: # see ei too mingit muud jura ette, toast kaib ainult labi
-                            myintent = droid.makeIntent("com.googlecode.android_scripting.action.LAUNCH_BACKGROUND_SCRIPT", None, None, extras, None, joru1, joru2).result
-                        try:
-                            droid.startActivityIntent(myintent)
-                            msg='tried to start'+script
-                            if fore == 1:
-                                msg=msg+' in foreground'
-                            else:
-                                msg=msg+' in background'
-                            print(msg)
-                            syslog(msg)
-                            todocode=0
-                        except:
-                            msg='FAILED to execute '+script+' '+str(sys.exc_info()[1])
-                            print(msg)
-                            syslog(msg)
-                            #traceback.print_exc()
-                            todocode=1
-                        time.sleep(10) # take a break while subprocess is active just in case...
-                    else:
-                        msg='file not found: '+script
-                        print(msg)
+
+                    if pull(filename,filesize,startnum)>0:
+                        pulltry=pulltry+1 # next try will follow
                         todocode=1
-                        time.sleep(2)
-                    
+                    else: # success
+                        pulltry=0
+                        todocode=0
+            else:
+                todocode=1
+                print('wrong number of parameters for pull')
+                
+        if TODO.split(',')[0] == 'push': # upload a file (with name and passcode given)
+            try:
+                filename=TODO.split(',')[1]
+                print('starting push with',filename)
+                todocode=push(filename) # no automated retry here
+            except:
+                msg='invalid cmd syntax for push'
+                print(msg)
+                syslog(msg)
+                todocode=99
+
+        if TODO.split(',')[0] == 'sqlread':
+            if len(TODO.split(',')) == 2: # cmd:sqlread,aichannels (no extension for sql file!)
+                tablename=TODO.split(',')[1]
+                if '.sql' in tablename:
+                    msg='invalid parameters for cmd '+TODO
+                    print(msg)
+                    syslog(msg)
+                    pulltry=88 # need to skip all tries below
                 else:
-                    todocode=1 # wrong number of parameters
-
-            if TODO.split(',')[0] == 'size': # get the size of filename (cmd:size,setup.sql)
-                script=TODO.split(',')[1]
-                try:
-                    dnsize=os.stat(script)[6]
+                    todocode=sqlread(tablename) # hopefully correct parameter (existing table, not sql filename)
+                    if tablename == 'setup' and todocode == 0: # table refreshed, let's use the new setup
+                        channelconfig() # possibly changed setup data to modbus registers
+                        report_setup() # let the server know about new setup
+            else: # wrong number of parameters
+                todocode=1
+        
+        if TODO.split(',')[0] == 'RMLOG': # delete log files in working directory (d4c)
+            files=glob.glob('*.log')
+            try:
+                for filee in files:
+                    os.remove(filee)
                     todocode=0
-                except:
+            except:
+                todocode=1 # failure to delete *.log
+                
+        # start scripts in parallel (with 10s pause in this channelmonitor). cmd:run,nimi,0 # 0 or 1 means bg or fore
+        # use background normally, the foreground process will open a window and keep it open until closed manually
+        if TODO.split(',')[0] == 'run':
+            if len(TODO.split(',')) == 3: # run any script in the d4c directory as foreground or background subprocess
+                script=TODO.split(',')[1]
+                if script in os.listdir('/sdcard/sl4a/scripts/d4c'): # file exists
+                    fore=TODO.split(',')[2] # 0 background, 1 foreground
+                    extras = {"com.googlecode.android_scripting.extra.SCRIPT_PATH":"/sdcard/sl4a/scripts/d4c/%s" % script}
+                    joru1="com.googlecode.android_scripting"
+                    joru2="com.googlecode.android_scripting.activity.ScriptingLayerServiceLauncher"
+                    if fore == '1': # see jatab akna lahti, pohiprotsess kaib aga edasi
+                        myintent = droid.makeIntent("com.googlecode.android_scripting.action.LAUNCH_FOREGROUND_SCRIPT", None, None, extras, None, joru1, joru2).result
+                    else: # see ei too mingit muud jura ette, toast kaib ainult labi
+                        myintent = droid.makeIntent("com.googlecode.android_scripting.action.LAUNCH_BACKGROUND_SCRIPT", None, None, extras, None, joru1, joru2).result
+                    try:
+                        droid.startActivityIntent(myintent)
+                        msg='tried to start'+script
+                        if fore == 1:
+                            msg=msg+' in foreground'
+                        else:
+                            msg=msg+' in background'
+                        print(msg)
+                        syslog(msg)
+                        todocode=0
+                    except:
+                        msg='FAILED to execute '+script+' '+str(sys.exc_info()[1])
+                        print(msg)
+                        syslog(msg)
+                        #traceback.print_exc()
+                        todocode=1
+                    time.sleep(10) # take a break while subprocess is active just in case...
+                else:
+                    msg='file not found: '+script
+                    print(msg)
                     todocode=1
+                    time.sleep(2)
+                
+            else:
+                todocode=1 # wrong number of parameters
+
+        if TODO.split(',')[0] == 'size': # get the size of filename (cmd:size,setup.sql)
+            script=TODO.split(',')[1]
+            try:
+                dnsize=os.stat(script)[6]
+                todocode=0
+            except:
+                todocode=1
 
 
-            # common part for all commands below
-            if todocode == 0: # success with TODO execution
-                msg='remote command '+TODO+' successfully executed'
-                if TODO.split(',')[0] == 'size' :
-                    msg=msg+', size '+str(dnsize)
-                if TODO.split(',')[0] == 'free' :
-                    msg=msg+', free MB,% '+repr(free)
-                if TODO == 'WLAN?':  # just reporting via ERV here 
-                    msg=msg+', state '+str(dnsize) # dnsize used as True or False variable
-                sendstring=sendstring+'ERS:0\n'
-                TODO='' # no more execution
-            else: # no success
-                msg='remote command '+TODO+' execution failed or incomplete on try '+str(pulltry)
-                sendstring=sendstring+'ERS:2\n'
-                if TODO.split(',')[0] == 'size':
-                    msg=msg+', file not found'
-                if 'pull,' in TODO and pulltry<5: # pull must continue
-                    msg=msg+', shall try again TODO='+TODO+', todocode='+str(todocode)
-                else: # no pull or enough pulling
-                    msg=msg+', giving up TODO='+TODO+', todocode='+str(todocode)
-                    TODO=''
-            print(msg)
-            syslog(msg)
-            sendstring=sendstring+'ERV:'+msg+'\n' # msh cannot contain colon or newline
-            udpsend(0,int(ts)) # SEND AWAY. no need for server ack so using 0 instead of inumm
+        # common part for all commands below
+        if todocode == 0: # success with TODO execution
+            msg='remote command '+TODO+' successfully executed'
+            if TODO.split(',')[0] == 'size' :
+                msg=msg+', size '+str(dnsize)
+            if TODO.split(',')[0] == 'free' :
+                msg=msg+', free MB,% '+repr(free)
+            if TODO == 'WLAN?':  # just reporting via ERV here 
+                msg=msg+', state '+str(dnsize) # dnsize used as True or False variable
+            sendstring=sendstring+'ERS:0\n'
+            TODO='' # no more execution
+        else: # no success
+            msg='remote command '+TODO+' execution failed or incomplete on try '+str(pulltry)
+            sendstring=sendstring+'ERS:2\n'
+            if TODO.split(',')[0] == 'size':
+                msg=msg+', file not found'
+            if 'pull,' in TODO and pulltry<5: # pull must continue
+                msg=msg+', shall try again TODO='+TODO+', todocode='+str(todocode)
+            else: # no pull or enough pulling
+                msg=msg+', giving up TODO='+TODO+', todocode='+str(todocode)
+                TODO=''
+        print(msg)
+        syslog(msg)
+        sendstring=sendstring+'ERV:'+msg+'\n' # msh cannot contain colon or newline
+        udpsend(0,int(ts)) # SEND AWAY. no need for server ack so using 0 instead of inumm
 
-            #TODO='' # must be emptied not to stay in loop
-            #print 'remote command processing done'
-            sys.stdout.flush()
-            #time.sleep(1)
-        else:
-            pulltry=0 # next time like first time
-        # ending processing the things to be done
+        #TODO='' # must be emptied not to stay in loop
+        #print 'remote command processing done'
+        sys.stdout.flush()
+        #time.sleep(1)
+    else: # todo == ''
+        pulltry=0 # next time like first time
+    # ending processing the things to be done
 
-
+    #print('-- TODO chk done') # debug
+    sys.stdout.flush() 
 
     # ####### now other things like making services messages to send to the monitoring server and launching REGULAR MESSANING ########
     ts=time.mktime(datetime.datetime.now().timetuple()) #time in seconds now
@@ -3662,16 +3696,31 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
     if OSTYPE == 'android' and USBstate != 1: # android but usb down, do not read *channels
         pass
     else: # in all other cases go ahead reading di channels
-        
+        #print('-- di chk starting') # debug - siin jarel tekib 5s paus???
+        #sys.stdout.flush()
         mbcommresult=read_dichannel_bits(9) # read di into sql # tegelikult vaja intelligentsemalt teha, et mitte addr siin ette anda
         
        
         if mbcommresult == 0: # ok, else incr err_dichannels
             msg='dichannels read success'
+            print(msg) # debug
+            sys.stdout.flush()
             err_dichannels=0
+            
+            #print('--- starting make_dichannels') # DEBUG
+            #sys.stdout.flush()
             make_dichannels() # di related service messages creation, insert message data into buff2server to be sent to the server # tmp OFF!
+            
+            
+            #print('--- starting write_dochannels') # DEBUG
+            #sys.stdout.flush()
             write_dochannels() # compare the current and needed channel values and write the channels to be changed with
+            
+            
+            #print('--- starting write_aochannels') # DEBUG
+            #sys.stdout.flush()
             write_aochannels() # compare the current and needed channel values and write the channels to be changed with
+            
         else:
             err_dichannels=err_dichannels+1 # read data into sqlite tables
             msg='dichannels read failure, err_dichannels '+str(err_dichannels)
@@ -3681,27 +3730,51 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
         # ##motor relay control
         # setbit_dochannels(bit, value, mba = 1, regadd = 0) # siin mitte veel teenuste kaudu, vaid otse. rauast soltuv ju...
         if Tairwater_actual != None and Tairwater_setpoint != None: # no data on first run
-            print('--- starting pulsecontrol run')
-            pulsecontrol=f4.output(pump_onlimit*(abs(Tairin_setpoint - Tairin_actual)/20)) # 3step motor control, inverteerituna (21.2.2014)
-            # lisaks mootori piiramises kiirusele arvets ka viga. kui viga (yle piiramise) pole, siis pole vaja ajamit liigutada.
-            if pulsecontrol[1]<0:  # >0: # up
-                setbit_dosvc('K2W',1,1) # svc,member,value
-                setbit_dosvc('K2W',2,0) # igaks juhuks, startimisel voib vaja olla....
-            elif pulsecontrol[1]>0: # <0: # dn
-                setbit_dosvc('K2W',2,1) # svc,member,value
-                setbit_dosvc('K2W',1,0) # igaks juhuks, startimisel voib vaja olla....
-            else:  # no pulse 
-                setbit_dosvc('K2W',1,0)
-                setbit_dosvc('K2W',2,0)
-                set_aivalue('V1W',2,pulsecontrol[3]) # kumul runtime muudetuna 0..100 voi -a -100..0 voi ka -20..70 vahemikku. FB pote puudub!
+            #print('--- starting pulsecontrol run')
+            if AppUptime > 100: # avoiding premature pulses on app rebvoot
+                #pulsecontrol=f4.output(pump_onlimit*(abs(Tairin_setpoint - Tairin_actual)/1)) # 3step motor control, et saaks vea x onlimit, leida vahe etteande 0 suhtes
+                # vale suunaga imp ei tohi kyllastuse ajal lubada!
+                if pump_onlimit * (Tairwater_setpoint - Tairwater_actual) > 0: # polarity check, to avoid pulse before pump speed change into other limit
+                    pulsecontrol=f4.output(pump_onlimit*(abs(round(Tairwater_setpoint - Tairwater_actual)))) # enne oli valesti, ohu temp alusel. peab oplema ikka vee...
+                else: # no pulse due to pump speed on wrong limit
+                    pulsecontrol=f4.output(0)
+                    print('3step avoiding pulse due to onlimit',pump_onlimit,'watererror',Tairwater_setpoint - Tairwater_actual)
+                # lisaks mootori piiramises kiirusele arvestada ka viga. kui viga (yle piiramise) pole, siis pole vaja ajamit liigutada.
+                if pulsecontrol[0]<0:  # >0: # vajaliku imp kestus sekundites
+                    set_aovalue(abs(1000*pulsecontrol[0]),9,110) # pwm do10 (value,mba,reg)
+                elif pulsecontrol[0]>0: # <0: # dn
+                    set_aovalue(abs(1000*pulsecontrol[0]),9,111) # pwm do11 (value,mba,reg)  / up vist
+                else:  # no pulse start needed 
+                    if pulsecontrol[1] == 0: # no ongoing pulse 
+                        set_aovalue(0,9,110) # to be ready for the next pulse via aochannels / aichannels sync
+                        set_aovalue(0,9,111) # to be ready for the next pulse via aochannels / aichannels sync
+                        set_aivalue('V1W',1,pulsecontrol[3]) # kumul runtime muudetuna 0..100 voi -a -100..0 voi ka -20..70 vahemikku. FB pote puudub!
+                
+                #if pulsecontrol[1]<0:  # >0: # up - nivoodega juhtimine, kuid liiga harva, et tapne olla
+                #    setbit_dosvc('K2W',1,1) # svc,member,value
+                #    setbit_dosvc('K2W',2,0) # igaks juhuks, startimisel voib vaja olla....
+                #elif pulsecontrol[1]>0: # <0: # dn
+                #    setbit_dosvc('K2W',2,1) # svc,member,value
+                #    setbit_dosvc('K2W',1,0) # igaks juhuks, startimisel voib vaja olla....
+                #else:  # no pulse 
+                #    setbit_dosvc('K2W',1,0)
+                #    setbit_dosvc('K2W',2,0)
+                #    set_aivalue('V1W',2,pulsecontrol[3]) # kumul runtime muudetuna 0..100 voi -a -100..0 voi ka -20..70 vahemikku. FB pote puudub!
+            else:
+                msg='waiting for AppUptime to grow up to 100 s before pulsecontrol, currently '+str(AppUptime)
+                print(msg)
+                syslog(msg)
                 
         else:
-            msg='data for pid and pulsecontrol not ready yet! tairwater_actual, tairwater_setpoint '+str(Tairwater_actual)+', '+str(Tairwater_setpoint)
-            f1.Initialize()  # et mingi jama integraal ei koguneks valede andmetega
-            f2.Initialize()
-            f3.Initialize() # step
+            msg='data for pid or pulsecontrol not ready yet! initializing f1...f4'
             print(msg)
             syslog(msg)
+            f1.Initialize()  # et mingi jama integraal ei koguneks valede andmetega
+            f2.Initialize()
+            f3.Initialize()
+            f4.Initialize()
+            setup2pid() # kehtestab setup alusel igasugu parameetrid. voimalik, et initialize pole siis vajagi.//
+            
         #############    
             
     #if USBstate == 1: # USB running (but errors on channels)
@@ -3730,7 +3803,7 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
         ts_interval1=ts
         
         # siia starmani ohkkyte pid ja ajamite mootorite juhtimine
-        print('---- starting pid run')
+        #print('---- starting pid run') # DEBUG
         Tairout_actual=get_aivalue('T5W',1)[0] # valine loop, f1
         Tairin_actual=get_aivalue('T6W',1)[0]   # keskmine loop, f2
         Tairwater_actual=get_aivalue('T7W',1)[0] # kalorifeeri tegelik temperatuur, sisemine loop, f3
@@ -3744,7 +3817,7 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
         #Tairin_setpoint=f1.output(Tairout_actual)[0] # pid control outer loop - vaklja jaetud 16.02.2014
         #Tairin_setpoint=Tairout_actual + Tairin_bias # sissepuhke temp etteanne valjatombetemperatuuri ja S200 alusel
         
-        Tairin_setpoint=float(get_setupvalue('S200')) # nii tihti poleks vaja lugeda, aga VARLIST ei toimi vist...
+        #Tairin_setpoint=float(get_setupvalue('S200')) # nyyd calendar tabeli alusel
         set_aivalue('T6W',2,Tairin_setpoint) # monitooringu 
         set_aivalue('T8W',3,Tairin_setpoint) # monitooringu perfdata hulka
         
@@ -3774,14 +3847,14 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
         set_aovalue(round(0.9*pump_speed),4,1) # pump 2 (value,mba,reg)   90% ylemise kiirusest
         
         # vent juhtimine V2W liikmed 1 ja 2, esialgu yhtemoodi
-        vent_setpoint=float(get_setupvalue('S220')) # max kiirus 0xffff  voi pigem 0xfff0. s220 piirkond 0..100!
+        #vent_setpoint=float(get_setupvalue('S220')) # max kiirus 0xffff  voi pigem 0xfff0. s220 piirkond 0..100!
         if vent_setpoint > 100:
             vent_setpoint = 100
         elif vent_setpoint <0:
             vent_setpoint = 0 # tegelikult peaks min piiri kontrollima, aga hiljem.
         set_aovalue(int(655.2*vent_setpoint),1,53249) # (value,mba,reg)
         set_aovalue(int(655.2*vent_setpoint),2,53249) # (value,mba,reg)
-        msg='vent speed based on S220 is '+str(round(vent_setpoint))+'%, sent to reg 53249 as 655.2 times bigger value of mba 1 and 2' # debug
+        msg='vent speed is '+str(round(vent_setpoint))+'%, sent to vents on mba 1 and 2' # debug
         print(msg)
         syslog(msg)
         
@@ -3804,10 +3877,10 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
             tcperr=0 
             
 
-        if MBerr[0]+MBerr[1]+MBerr[2]+MBerr[3] > 0: # regular notif about modbus problems
-            msg='MBerr '+str(repr(MBerr))+', tcperr '+str(tcperr)+', USBstate '+str(USBstate)
-            syslog(msg)
-            print(msg)
+        #if MBerr[0]+MBerr[1]+MBerr[2]+MBerr[3] > 0: # regular notif about modbus problems
+        #    msg='MBerr '+str(repr(MBerr))+', tcperr '+str(tcperr)+', USBstate '+str(USBstate)
+        #    syslog(msg)
+        #    print(msg)
 
 
         if err_dichannels+err_aichannels+err_counters>0: # print channel comm errors
@@ -3828,7 +3901,11 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
             sys.stdout.flush()
             time.sleep(0.5)
 
-        mbcommresult=read_aichannels()
+        mbcommresult=read_aichannels('T6W') # SP temp tegelik # siin veidi tihedam mootmine paarile suurusele et pid reaktsioon ei aeglustuks.
+        mbcommresult=read_aichannels('T7W') # kalorif vee temp tegelik
+        mbcommresult=read_aichannels('M1W') # 3T ajami impulsid ms
+        if (get_aivalue('M1W',1)[0] + get_aivalue('M1W',2)[0]) > 0:
+            make_aichannels('M1W') # saadame kohe kui M1W vaartused yle 0 0
         if mbcommresult == 0: # ok, else incr err_aichannels
             err_aichannels=0
         else:
@@ -3858,6 +3935,37 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
             syslog(msg)
             sendstring=sendstring+'SLW:'+str(GSMlevel)+' '+str(WLANlevel)+'\nSLS:0\n' # status to be added!
 
+        
+        # check setpoints from calendar
+        sp=chk_calevents('V') # vent speed setpoint based on gcal or setup, temporary variable
+        osp=vent_setpoint # old setpoint, temporary
+        if sp != None and sp != '':
+            vent_setpoint = float(sp)
+        else:
+            vent_setpoint = float(get_setupvalue('S220'))  # 0..100%
+        if osp != vent_setpoint:
+            msg='vent_setpoint changed from '+str(osp)+' to '+str(vent_setpoint)
+            print(msg)
+            syslog(msg)
+        
+        sp=chk_calevents('T') # sp temp setpoint based on gcal or setup
+        osp=Tairin_setpoint
+        if sp != None and sp != '':
+            Tairin_setpoint = 10*float(sp) # ddegC
+        else:
+            Tairin_setpoint = float(get_setupvalue('S200')) # ddegC
+        if osp != Tairin_setpoint:
+            msg='Tairin_setpoint changed from '+str(osp)+' to '+str(Tairin_setpoint)
+            print(msg)
+            syslog(msg)
+        
+        
+            
+        mbcommresult=read_aichannels()
+        if mbcommresult == 0: # ok, else incr err_aichannels
+            err_aichannels=0
+        else:
+            err_aichannels=err_aichannels+1 # read data into sqlite tables
 
         make_aichannels() # put ai data into buff2server table to be sent to the server - only if successful reading!
 
@@ -3885,77 +3993,54 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
                 if OSTYPE == 'android':
                     droid.ttsSpeak(msg)
 
-        #if OSTYPE == 'archlinux':
-            #getset_network('ether') # chk and chg network parameters / creates netlink l eftover??
         
-        # ############################################################ temporary check to debug di part here, not as often as normally
-        #read_dichannel_bits() # di read as bitmaps from registers. use together with the make_dichannel_svc()!
-        #make_dichannel_svc() # di related service messages creation, insert message data into buff2server to be sent to the server
-        #write_dochannels() # compare the current and new channels values and use write_register() to control the channels to be changed with
-        # end di part. put into fastest loop for fast reaction!
-        # ###########################################################
-
-    # ### resending the unchanged di values just to avoid unknown state for them oin nagios, once in 4 minutes or so
-    if ts>renotifydelay+ts_lastnotify:  # regular messaging not related to registers but rather to program variables
-        msg="renotify application variables due to ts "+str(ts)+">"+str(renotifydelay+ts_lastnotify)+", renotifydelay "+str(renotifydelay)
-        print(msg)
-        syslog(msg)
-        ts_lastnotify=ts # remember timestamp
-
-        make_dichannels() # test to fix renotify
-
+        # repeat some service messages
         sendstring=sendstring+array2regvalue(MBsta,'EXW',2) # EXW, EXS reporting periodical based on MBsta[] for up to 4 modbus addresses
         sendstring=sendstring+array2regvalue(TCW,'TCW',0) # traffic TCW[] reporting periodical, no status above 0
-
-        #testdata() # test services / can be used instead of read_*()
-        #unsent()  # unsent by now. chk using renotifydelay to send again or delete of too old. vigane! kustutab ka selle, mis on vaja saata!
-
-        #if ts>ts_boot + 20: # to avoid double messsaging on startup
-        sendstring=sendstring+array2regvalue(MBsta,'EXW',2) # EXW, EXS reporting even if not changed
-
-        AppUptime=int(ts-ts_boot)
+        
         sendstring=sendstring+"UPV:"+str(AppUptime)+"\nUPS:" # uptime value in seconds
         if AppUptime>1800: # status during first 30 min of uptime is warning, then ok
             sendstring=sendstring+"0\n" # ok
         else:
             sendstring=sendstring+"1\n" # warning
 
+        if OSTYPE == 'android':
+            sendstring=sendstring+'UDW:'+str(PhoneUptime)+' '+str(ProxyUptime)+' '+str(USBuptime)+' '+str(AppUptime)+'\nUDS:' # diagnostic uptimes, add status!
+            if USBuptime>900 and AppUptime>1800:
+                sendstring=sendstring+'0\n' # ok
+            else:
+                sendstring=sendstring+'1\n' # warning about recent restart
+        
+        # analogue svc part end
+        
+        
+    # ### resending the unchanged di values just to avoid unknown state for them oin nagios, once in 4 minutes or so
+    if ts>renotifydelay+ts_lastnotify:  # 240 s, regular messaging not related to registers but rather to program variables
+        # gcal check here, perhaps less frequently later
+        get_calendar(mac) # delete old and insert new data into calendar table
 
-        sendstring=sendstring+'UDW:'+str(PhoneUptime)+' '+str(ProxyUptime)+' '+str(USBuptime)+' '+str(AppUptime)+'\nUDS:' # diagnostic uptimes, add status!
-        if USBuptime>900 and AppUptime>1800:
-            sendstring=sendstring+'0\n' # ok
-        else:
-            sendstring=sendstring+'1\n' # warning about recent restart
-
-
-
-
-    #send it all away, some go via buff2server, some directly from here below
-
+        msg="renotify application variables due to ts "+str(ts)+">"+str(renotifydelay+ts_lastnotify)+", renotifydelay "+str(renotifydelay)
+        print(msg)
+        syslog(msg)
+        ts_lastnotify=ts # remember timestamp
+        make_dichannels() # test to fix renotify
 
     if sendstring != '': # there is something to send, use udpsend()
         udpsend(0,int(ts)) # SEND AWAY. no need for server ack so using 0 instead of inumm
 
-    # REGULAR MESSAGING RELATED PART END (AI, COUNTERS)
-
-
-
-
-    # control logic FOR OUTPUTS goes to a separate script, manipulating dochannels only. ##################
-
-
-
+        
     udpmessage() # chk buff2server for messages to send or resend. perhaps not on the fastest possible rate?
 
 
 
     #but immediately if there as a change in dichannels data. no problems executong every time if select chg is fast enough...
 
-    #print('.',) # dots are signalling the fastest loop executions here - blue led is better...
-    sys.stdout.write('.')
+    #print('-- while loop end') # dots are signalling the fastest loop executions here - blue led is better...
+    #sys.stdout.write('.') # dot without newline
     sys.stdout.flush() # to update the log for every dot
 
-
+    # while loop end
+    
 UDPlockSock.close()
 msg='script ending due to stop signal'
 print(msg)

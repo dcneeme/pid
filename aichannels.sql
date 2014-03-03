@@ -35,12 +35,12 @@ INSERT INTO "aichannels" VALUES('','','T5W','3','0','0','100','0','100','0','','
 INSERT INTO "aichannels" VALUES('','','T5W','4','0','0','100','0','100','0','','1','','0','300','0','','temp channel 1','hi limit',3); -- VT hi alarm
 
 -- SissepuhkeTemp
-INSERT INTO "aichannels" VALUES('9','602','T6W','1','33','0','80','0','50','150','300','3','','','110','0','','temp SP','28FAAE98040000D9',3); -- SP tegelik, 1 wire d9
+INSERT INTO "aichannels" VALUES('9','602','T6W','1','33','0','80','0','50','170','300','3','','','110','0','','temp SP','28FAAE98040000D9',3); -- SP tegelik, 1 wire d9
 INSERT INTO "aichannels" VALUES('','','T6W','2','0','0','100','0','100','0','','1','','0','110','0','','temp channel 2','ai7 voltage',3); -- SP setpoint
-INSERT INTO "aichannels" VALUES('','','T6W','3','0','0','100','0','100','0','','1','','0','180','0','','temp channel 1','lo limit',3); -- VT lo limit, arvesta get_ai()[] kaudu
+INSERT INTO "aichannels" VALUES('','','T6W','3','0','0','100','0','100','0','','1','','0','170','0','','temp channel 1','lo limit',3); -- VT lo limit, arvesta get_ai()[] kaudu
 INSERT INTO "aichannels" VALUES('','','T6W','4','0','0','100','0','100','0','','1','','0','300','0','','temp channel 1','hi limit',3); -- VT hi limit
 
-INSERT INTO "aichannels" VALUES('9','600','T7W','1','33','0','80','0','50','150','600','3','','','110','0','','temp vesi','28E0F59B040000A8',3); -- kalorif sisse, 1 wire 
+INSERT INTO "aichannels" VALUES('9','600','T7W','1','33','0','80','0','50','150','600','3','','','110','0','','temp vesi','28E0F59B040000A8',3); -- vesi kalorif sisse, 1 wire 
 INSERT INTO "aichannels" VALUES('','','T7W','2','0','0','100','0','100','0','','1','','','110','0','','temp channel 2','ai7 voltage',3); -- kalorif setpoint
 INSERT INTO "aichannels" VALUES('','','T7W','3','0','0','100','0','100','0','','1','','0','150','0','','temp channel 1','lo limit',3); -- kalorif lo alarm
 INSERT INTO "aichannels" VALUES('','','T7W','4','0','0','100','0','100','0','','1','','0','600','0','','temp channel 1','hi limit',3); -- kalorif hi alarm
@@ -78,6 +78,9 @@ INSERT INTO "aichannels" VALUES('','','V1W','3','0','0','100','0','100','0','10'
 INSERT INTO "aichannels" VALUES('1','53249','V2W','1','17','0','65520','0','100','10','100','1','','','110','0','','vent1 speed juht','ao',2); -- vent 1 0..100, juhtimine ao. tegelikku vt allpool inpout reg kui huvitab....
 INSERT INTO "aichannels" VALUES('2','53249','V2W','2','17','0','65520','0','100','10','100','1','','','110','0','','vent2 speed juht','ao',2); -- vent2 0..100 0..ffff, kasuta ao kaudu juhtimiseks
 INSERT INTO "aichannels" VALUES('','','V2W','3','0','0','100','0','100','0','10','1','','','20','0','','lo warning','ao',2); -- min joon, hoiatuseks?
+
+INSERT INTO "aichannels" VALUES('9','110','M1W','1','16','0','100','0','100','0','100','1','','','110','0','','ajami juht','ao',2); -- ajami juhtimise abiteenus, viimase imp kestus ms
+INSERT INTO "aichannels" VALUES('9','111','M1W','2','16','0','100','0','100','10','100','1','','','110','0','','ajami juht','ao',2); -- ajami juhtimise abiteenus
 
 
 -- lisa siia torustiku rohk reg 2 ja pumpade voolud reg 4 ning 5. lugeda fc 04, mitte 03!
