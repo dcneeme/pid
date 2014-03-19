@@ -25,7 +25,7 @@ INSERT INTO 'setup' VALUES('S53','0','','outer air loop kD','',0); -- D
 INSERT INTO 'setup' VALUES('S54','200','','outer air loop output lolim','',0); -- valjundi madalm piir (etteanne sp ohu jaoks)
 INSERT INTO 'setup' VALUES('S55','350','','outer air loop output hilim','',0); -- valjundi korgem piir (etteanne sp ohu jaoks)
 
-INSERT INTO 'setup' VALUES('S61','5','','inner air loop kP','',0); -- P  SP OHK  enne oli 0 1 5 
+INSERT INTO 'setup' VALUES('S61','2','','inner air loop kP','',0); -- P  SP OHK  enne oli 0 1 5 2
 INSERT INTO 'setup' VALUES('S62','0.01','','inner air loop kI','',0); -- I  enne oli 0.01ja 0,.005 / hirmus aeglane jargironimine...
 INSERT INTO 'setup' VALUES('S63','10','','inner air loop kD','',0); -- D -- oli ka 100 vahepeal...
 INSERT INTO 'setup' VALUES('S64','170','','lolim','',0); -- valjundi madalam piir (etteanne kalorif vee jaoks)

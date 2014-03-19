@@ -4,7 +4,7 @@
 # 3) listening commands and new setup values from the central server; 4) comparing the dochannel values with actual do values in dichannels table and writes to eliminate  the diff.
 # currently supported commands: REBOOT, VARLIST, pull, sqlread, run
 
-APVER='channelmonitor_starman.py 03.03.2014'  # linux and python3 -compatible. for STARMAN only.
+APVER='channelmonitor_starman.py 08.03.2014'  # linux and python3 -compatible. for STARMAN only.
 
 # 23.06.2013 based on channelmonitor3.py
 # 25.06.2013 added push cmd, any (mostly sql or log) file from d4c directory to be sent into pyapp/mac on itvilla.ee, this SHOULD BE controlled by setup.sql - NOT YET!
@@ -70,7 +70,10 @@ APVER='channelmonitor_starman.py 03.03.2014'  # linux and python3 -compatible. f
   #  kontrolli ai-ai sync suhet inout registritega, kui sama adr 3.1 4.1 holding ja input!!! esialgu kommenteerisin valja rohuvahe
 # 01.03.2014 added gcal import into calendars table from json. is TODO execution still alive??
 # 02.03.2014 single read_ai_channels(svc) read not to waste time on all of the registers in pumps and ventilators. added pulsecontrol delay on boot.
-# 03.03.2014 dealing w oscillations and onlimit exceptions related to f4-pulses
+# 03.03.2014 dealing w oscillations and onlimit exceptions related to f4-pulses. quit app on mba errors! restart by appd may help... 
+# 07.03.2014 katsetused npe peal. moned try: jms
+# 08.03.2014 proge peab lopetama, kui ioplaat (mba 9) enam ei vasta. appdh.sh teeb modbus suhtluse korda ja proge kaivitub uuesti.
+
 
 # PROBLEMS and TODO
 # calendar chk to often, with ana!
@@ -497,7 +500,7 @@ def write_aochannels(): # synchronizes AI registers with data in aochannels tabl
             if row[1] != '':
                 value=int(float(row[2])) # komaga nr voib olla, teha int!
             msg='write_aochannels: going to write value '+str(value)+' to register mba.regadd '+str(mba)+'.'+str(regadd) 
-            #print(msg) # debug
+            print(msg) # debug
             #syslog(msg)
 
             try:
@@ -811,8 +814,8 @@ def read_aichannels(svc = ''): # analogue inputs via modbusTCP, to be executed r
                             result = client.read_holding_registers(address=regadd, count=1, unit=mba) # using fc03
                         tcpdata = result.registers[0] # reading modbus slave
                         msg=msg+' raw '+str(tcpdata)
-                        if mba<5:
-                            MBerr[mba]=0
+                        #if mba<5:
+                        #    MBerr[mba]=0
 
                         if x1 != x2 and y1 != y2: # konf normaalne
                             value=(tcpdata-x1)*(y2-y1)/(x2-x1) # lineaarteisendus
@@ -1116,11 +1119,12 @@ def read_dichannel_bits(mba): # binary inputs, bit changes to be found and value
             try: # if respcode == 0: # successful DI register reading - continuous to catch changes! ################################
                 result = client.read_holding_registers(address=regadd, count=1, unit=mba) # respcode=read_register(mba,regadd,1) # 1 register at the time, from mb slave
                 tcpdata = result.registers[0]  # saab ka bitivaartusi lugeda!
-                if mba<5:
-                    MBerr[mba]=0
+                #if mba<5:
+                #    MBerr[mba]=0
                 #print ', result',format("%04x" % tcpdata)
             except:
                 msg='di register '+str(mba)+'.'+str(regadd)+' read FAILURE! no sql update! '+str(sys.exc_info()[1])  # debug
+                MBerr[mba]=MBerr[mba] + 1
                 print(msg) # debug
                 syslog(msg) # debug
                 #traceback.print_exc() # debug
@@ -1459,7 +1463,7 @@ def read_counters(): # counters, usually 32 bit / 2 registers.
                             tcpdata = 65536*result.registers[1]+result.registers[0]  # wrong word order for counters in barionet!
                             print('barionet counter result',tcpdata,'based on',str(result.registers[1]),str(result.registers[0])) # debug
 
-                        MBerr[mba]=0
+                        #MBerr[mba]=0
                         raw=tcpdata # let's keep the raw
                         value=tcpdata # will be converted later
                         if lisa != '':
@@ -2665,9 +2669,17 @@ def get_calendar(mac, days = 3): # query to SUPPORTHOST, returning txt. started 
         traceback.print_exc()
         print(msg)
         syslog(msg)
-        return 1
+        return 1 # kui ei saa gcal yhendust, siis lopetab ja vana ei havita!
 
-    events = eval(response.content) # string to list
+    try:
+        events = eval(response.content) # string to list
+    except:
+        msg='getting calendar events failed for mac '+mac
+        print(msg)
+        syslog(msg)
+        traceback.print_exc() # debug
+        return 1 # kui ei saa normaalseid syndmusi, siis ka lopetab
+        
     #print(repr(events)) # debug
     Cmd4 = "BEGIN IMMEDIATE TRANSACTION"
     try:
@@ -2693,7 +2705,7 @@ def get_calendar(mac, days = 3): # query to SUPPORTHOST, returning txt. started 
         print(msg)
         syslog(msg)
         traceback.print_exc() # debug
-        return 1
+        return 1 # kui insert ei onnestu, siis ka delete ei toimu
         
         
 def chk_calevents(title = ''): # set a new setpoint if found in table calendar (sharing database connection with setup)
@@ -2927,12 +2939,12 @@ try: # is it android? using modbustcp then
     import android_network # android_network.py and android_utils.py must be present!
 
     import os.path
-    from pymodbus.client.sync import ModbusTcpClient as ModbusClient # modbusTCP
-
-    OSTYPE='android'
     
+    OSTYPE='android'
     tcpport=10502 # modbusproxy
     tcpaddr="127.0.0.1" # localhost ip to use for modbusproxy
+        
+    from pymodbus.client.sync import ModbusTcpClient as ModbusClient # modbusTCP
     client = ModbusClient(host=tcpaddr, port=tcpport)
     
     import BeautifulSoup # ?
@@ -2963,15 +2975,18 @@ except: # some linux
         tcpport=0 # using pyserial
         tcpaddr='' # no modbustcp address given
         
-    elif 'mcedit' in os.environ['EDITOR']:
+    elif 'techbase' in os.environ['HOSTNAME']: # npe
         OSTYPE='techbaselinux'
         # kumb (rtu voi tcp) importida, vajab katsetamist
+        from pymodbus.client.sync import ModbusSerialClient as ModbusClient # using serial modbusRTU
+        client = ModbusClient(method='rtu', stopbits=1, bytesize=8, parity='E', baudrate=19200, timeout=0.3, port='/dev/ttyS3') # 0.2 oli vahe, lollistus vahel ja jai lolliks
         
-    else: #mac saamine tegemata!
+    else: # ei ole ei android, arch ega techbase
         #OSTYPE=os.environ['OSTYPE'] #  == 'linux': # running on linux, not android
-        OSTYPE='linux'
+        OSTYPE='linux' # generic
         from pymodbus.client.sync import ModbusTcpClient as ModbusClient # modbusTCP
-        client = ModbusClient(method='rtu', stopbits=1, bytesize=8, parity='E', baudrate=19200, timeout=0.2, port='/dev/ttyS0') # change if needed
+        client = ModbusClient(host=tcpaddr, port=tcpport) # TCP
+        #client = ModbusClient(method='rtu', stopbits=1, bytesize=8, parity='E', baudrate=19200, timeout=0.2, port='/dev/ttyS0') # change if needed
         
         print('running on generic linux')   # argumente vaja!
 
@@ -3877,10 +3892,20 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
             tcperr=0 
             
 
-        #if MBerr[0]+MBerr[1]+MBerr[2]+MBerr[3] > 0: # regular notif about modbus problems
-        #    msg='MBerr '+str(repr(MBerr))+', tcperr '+str(tcperr)+', USBstate '+str(USBstate)
-        #    syslog(msg)
-        #    print(msg)
+        MBerrSum=0
+        for mba in range(len(MBerr)):
+            MBerrSum = MBerrSum+MBerr[mba]
+        
+        if MBerrSum > 5:
+            msg='modbus errors: '+str(repr(MBerr))
+            print(msg)
+            syslog(msg)
+            
+        if MBerrSum > 100:
+            msg='stopping the script due to too many modbus errors: '+str(repr(MBerr))
+            print(msg)
+            syslog(msg)
+            TODO='REBOOT' # stop the script in a hope to be restarted by appd.sh on olinuxino on proxy on android
 
 
         if err_dichannels+err_aichannels+err_counters>0: # print channel comm errors
@@ -3904,13 +3929,16 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
         mbcommresult=read_aichannels('T6W') # SP temp tegelik # siin veidi tihedam mootmine paarile suurusele et pid reaktsioon ei aeglustuks.
         mbcommresult=read_aichannels('T7W') # kalorif vee temp tegelik
         mbcommresult=read_aichannels('M1W') # 3T ajami impulsid ms
-        if (get_aivalue('M1W',1)[0] + get_aivalue('M1W',2)[0]) > 0:
-            make_aichannels('M1W') # saadame kohe kui M1W vaartused yle 0 0
-        if mbcommresult == 0: # ok, else incr err_aichannels
-            err_aichannels=0
-        else:
-            err_aichannels=err_aichannels+1 # read data into sqlite tables
-
+        try: # et ei seiskuks, kui nonetype tuleb
+            if (get_aivalue('M1W',1)[0] + get_aivalue('M1W',2)[0]) > 0:
+                make_aichannels('M1W') # saadame kohe kui M1W vaartused yle 0 0
+            if mbcommresult == 0: # ok, else incr err_aichannels
+                err_aichannels=0
+            else:
+                err_aichannels=err_aichannels+1 # read data into sqlite tables
+        except:
+            traceback.print_exc()
+            
         #if USBstate == 1: # but errors in register reading
         if OSTYPE == 'android' and USBstate != 1: # android but usb down
             pass
