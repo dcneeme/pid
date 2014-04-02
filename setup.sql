@@ -38,7 +38,7 @@ INSERT INTO 'setup' VALUES('S84','50','','lolim','',0); -- valjundi madalam piir
 INSERT INTO 'setup' VALUES('S85','200','','hilim','',0); -- valjundi korgem piir (pumba max kiirus 100%)
 
 
--- 3step params motortime = 130, maxpulse = 10, maxerror = 100, minpulse =1 , minerror = 1, runperiod = 20
+-- 3step params motortime = 130
 INSERT INTO 'setup' VALUES('S71','0.25','','minpulse s','',0); -- alla 0.5 s pole motet, enne alla 5 ei saanudki kuidagi. pwm abil saab
 INSERT INTO 'setup' VALUES('S72','4','','maxpulse s','',0); -- pwm max on 4.095s
 INSERT INTO 'setup' VALUES('S73','30','','runperiod s','',0); -- pulsside kordus millise perioodiga - oli 240 ja ka 30, vimane vonkus. 120 240 30 60 30
@@ -46,6 +46,14 @@ INSERT INTO 'setup' VALUES('S74','120','','motortime s','',0); -- aeg yhest serv
 INSERT INTO 'setup' VALUES('S75','10','','minerror','',0); -- maarab symm tundetuse tsooni. oli 30 10 5 15 30 suunakaitse! 10
 INSERT INTO 'setup' VALUES('S76','500','','maxerror','',0); -- maarab tundlikkuse. mida vaiksem, seda tundlikum. ddegC. alla 300 ara siia pane. oli 100 300 500
 -- tihedamalt ja vaiksem samm korraga peaks parem olema vonkumise vastu?
+
+-- 3step bypass ajam motortime = 240
+INSERT INTO 'setup' VALUES('S91','5','','minpulse s','',0); -- alla 0.5 s pole motet, enne alla 5 ei saanudki kuidagi. pwm abil saab
+INSERT INTO 'setup' VALUES('S92','15','','maxpulse s','',0); -- pwm max on 4.095s
+INSERT INTO 'setup' VALUES('S93','30','','runperiod s','',0); -- pulsside kordus millise perioodiga - oli 240 ja ka 30, vimane vonkus. 120 240 30 60 30
+INSERT INTO 'setup' VALUES('S94','240','','motortime s','',0); -- aeg yhest servast teise kerimiseks
+INSERT INTO 'setup' VALUES('S95','10','','minerror','',0); -- maarab symm tundetuse tsooni. oli 30 10 5 15 30 suunakaitse! 10
+INSERT INTO 'setup' VALUES('S96','50','','maxerror','',0); -- maarab tundlikkuse. mida vaiksem, seda tundlikum. ddegC. 
 
 
 INSERT INTO 'setup' VALUES('S200','180','','setpoint air in temp','ddeg',0); -- default temp setpoint sissepuhkele, kui gcal midagi muud ei anna. ddeg

@@ -4,7 +4,7 @@
 # 3) listening commands and new setup values from the central server; 4) comparing the dochannel values with actual do values in dichannels table and writes to eliminate  the diff.
 # currently supported commands: REBOOT, VARLIST, pull, sqlread, run
 
-APVER='channelmonitor_starman.py 08.03.2014'  # linux and python3 -compatible. for STARMAN only.
+APVER='channelmonitor_starman.py 22.03.2014'  # linux and python3 -compatible. for STARMAN only.
 
 # 23.06.2013 based on channelmonitor3.py
 # 25.06.2013 added push cmd, any (mostly sql or log) file from d4c directory to be sent into pyapp/mac on itvilla.ee, this SHOULD BE controlled by setup.sql - NOT YET!
@@ -69,11 +69,12 @@ APVER='channelmonitor_starman.py 08.03.2014'  # linux and python3 -compatible. f
 # 21.02.2014 added reading input registers for aichannels, based on type. pump_onlinmit alusel ajami juhtimine korda, f4 minerror olgu alla 1!
   #  kontrolli ai-ai sync suhet inout registritega, kui sama adr 3.1 4.1 holding ja input!!! esialgu kommenteerisin valja rohuvahe
 # 01.03.2014 added gcal import into calendars table from json. is TODO execution still alive??
-# 02.03.2014 single read_ai_channels(svc) read not to waste time on all of the registers in pumps and ventilators. added pulsecontrol delay on boot.
+# 02.03.2014 single read_ai_channels(svc) read not to waste time on all of the registers in pumps and ventilators. added v3_control delay on boot.
 # 03.03.2014 dealing w oscillations and onlimit exceptions related to f4-pulses. quit app on mba errors! restart by appd may help... 
 # 07.03.2014 katsetused npe peal. moned try: jms
 # 08.03.2014 proge peab lopetama, kui ioplaat (mba 9) enam ei vasta. appdh.sh teeb modbus suhtluse korda ja proge kaivitub uuesti.
-
+# 20.03.2014 lisada moodaviiguajami juhtimine
+# 22.03.2014 eelmise lopetamine, test starmanis
 
 # PROBLEMS and TODO
 # calendar chk to often, with ana!
@@ -2631,12 +2632,19 @@ def setup2pid(): # execute when setup was modified or read
         f3.setMin(float(get_setupvalue('S84')))
         f3.setMax(float(get_setupvalue('S85')))
         
-        f4.setMinpulseLength(float(get_setupvalue('S71'))) # mootoriajam vee temp j.
-        f4.setMaxpulseLength(float(get_setupvalue('S72'))) # aga pumba kiirus mojub ka!
+        f4.setMinpulseLength(float(get_setupvalue('S71'))) # 3T ventiili mootoriajam vee temp jargi.
+        f4.setMaxpulseLength(float(get_setupvalue('S72'))) # 
         f4.setRunPeriod(float(get_setupvalue('S73'))) #
         f4.setMotorTime(float(get_setupvalue('S74'))) # 
         f4.setMinpulseError(float(get_setupvalue('S75'))) #
         f4.setMaxpulseError(float(get_setupvalue('S76'))) #
+        
+        f5.setMinpulseLength(float(get_setupvalue('S91'))) # bypass ajam sp ohu temp jargi.
+        f5.setMaxpulseLength(float(get_setupvalue('S92'))) #
+        f5.setRunPeriod(float(get_setupvalue('S93'))) #
+        f5.setMotorTime(float(get_setupvalue('S94'))) # 
+        f5.setMinpulseError(float(get_setupvalue('S95'))) #
+        f5.setMaxpulseError(float(get_setupvalue('S96'))) #
         
     except:
         msg='pid: problem setting parameters to instances! '+str(sys.exc_info()[1])
@@ -2721,8 +2729,9 @@ def chk_calevents(title = ''): # set a new setpoint if found in table calendar (
         cursor4.execute(Cmd4)
         for row in cursor4:
             value=row[0] # overwrite with the last value before now
+            #print(Cmd4,', value',value) # debug. voib olla mitu rida, viimane value jaab iga title jaoks kehtima
         conn4.commit()
-        return value # can be empty string too, then use default value for setpoint related to title
+        return value # last one for given title becomes effective. can be empty string too, then use default value for setpoint related to title
     except:
         traceback.print_exc()
         return None
@@ -2916,18 +2925,21 @@ cursor4=conn4.cursor()
 
 
 # starman related part
-from pid import * # PID and ThreeStep classes here are needed
+from pid import * # PID and ThreeStep classes are needed
 #from threestep import *
 f1=PID(P=5,I=1,D=0,min=180,max=300) # outer loop, valjund on sissepuhketemperatuur, piiratud, yhikud ddeg
 f2=PID(P=5,I=1,D=0,min=150,max=600) # middle loop, valjund on vee temperatuur, ddeg
 f3=PID(P=5,I=1,D=0,min=10,max=200)
 f4=ThreeStep(setpoint=0, motortime = 130, maxpulse = 10, maxerror = 2, minpulse = 2 , minerror = 0.5, runperiod = 60) # kalorifeeri ajam, pumbajuhtimise onlimit alusel
+f5=ThreeStep(setpoint=0, motortime = 240, maxpulse = 20, maxerror = 2, minpulse = 2 , minerror = 0.5, runperiod = 60) # soojusvaheti moodaviik 22.3.2014
 Tairout_setpoint=220 # valjatombe etteandetemp, S200 tapsustab - seda ei kasuta tegelikult
 Tairin_setpoint=200 # S200 tapsustab, vt alusel enam ei juhi, radikakyte on tugevam
 Tairin_bias=0 # S200 tapsustab
 Tairwater_actual = None
 Tairwater_setpoint = None
 pump_onlimit=0 # pumbakiiruse piiramine lykkab 3T ventiili enda ees
+v3_onlimit = 0 # 3Tventiil kas paris kinni (-1) voi pARIS LAHTI (+1)
+bp_onlimit = 0 # bypass kas paris kinni (-1) voi pARIS LAHTI (+1)
 ###    
 
 
@@ -3745,49 +3757,94 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
         # ##motor relay control
         # setbit_dochannels(bit, value, mba = 1, regadd = 0) # siin mitte veel teenuste kaudu, vaid otse. rauast soltuv ju...
         if Tairwater_actual != None and Tairwater_setpoint != None: # no data on first run
-            #print('--- starting pulsecontrol run')
-            if AppUptime > 100: # avoiding premature pulses on app rebvoot
-                #pulsecontrol=f4.output(pump_onlimit*(abs(Tairin_setpoint - Tairin_actual)/1)) # 3step motor control, et saaks vea x onlimit, leida vahe etteande 0 suhtes
+            #print('--- starting valve v3_control run')
+            if AppUptime > 200: # avoiding premature f4, f5 pulses on app restart. asendi peaks serverist kysima peale restarti...
                 # vale suunaga imp ei tohi kyllastuse ajal lubada!
-                if pump_onlimit * (Tairwater_setpoint - Tairwater_actual) > 0: # polarity check, to avoid pulse before pump speed change into other limit
-                    pulsecontrol=f4.output(pump_onlimit*(abs(round(Tairwater_setpoint - Tairwater_actual)))) # enne oli valesti, ohu temp alusel. peab oplema ikka vee...
-                else: # no pulse due to pump speed on wrong limit
-                    pulsecontrol=f4.output(0)
-                    print('3step avoiding pulse due to onlimit',pump_onlimit,'watererror',Tairwater_setpoint - Tairwater_actual)
-                # lisaks mootori piiramises kiirusele arvestada ka viga. kui viga (yle piiramise) pole, siis pole vaja ajamit liigutada.
-                if pulsecontrol[0]<0:  # >0: # vajaliku imp kestus sekundites
-                    set_aovalue(abs(1000*pulsecontrol[0]),9,110) # pwm do10 (value,mba,reg)
-                elif pulsecontrol[0]>0: # <0: # dn
-                    set_aovalue(abs(1000*pulsecontrol[0]),9,111) # pwm do11 (value,mba,reg)  / up vist
+                Tairwater_error=Tairwater_setpoint - Tairwater_actual  #seda laheb mitmes kohas vaja. kui >0, siis on vaja soojemaks!
+                Tairin_error=Tairin_setpoint - Tairin_actual
+                if pump_onlimit * (Tairwater_error) > 0: # speed_limit polarity check, to avoid pulse before CORRECT pump speed limit
+                    #enable pulse control in general. further checks for 3T vs ByPass!
+                    print('v3 or bypass pulse may be needed') # debug
+                    if Tairin_error > 0: # need for warmer air
+                        if bp_onlimit < 0: # bypass closed
+                            if bp_control != None:
+                                print('bypass seems to be closed, cum runtime ',bp_control[3],', v3 opening is possible') # debug
+                            v3_control=f4.output(Tairwater_error) # 3T ventiili avamine. tulemus tuple
+                            bp_control=f5.output(0) # bypass impulssi ei tee. tulemus tuple
+                        else:
+                            if bp_control != None:
+                                print('bypass seems NOT to be closed, cum runtime ',bp_control[3],', bp closing is possible') # debug
+                            bp_control=f5.output(Tairin_error) # bypass klapi voimalik sulgemine. tulemus tuple
+                            v3_control=f4.output(0) # tulemus tuple
+                    else: # neeed for cooler air
+                        if v3_onlimit < 0: # 3T valve closed
+                            if v3_control != None:
+                                print('v3 seems to be closed, cum runtime ',v3_control[3],', bp opening is possible') # debug
+                            v3_control=f4.output(0) # tulemus tuple
+                            bp_control=f5.output(Tairin_error) # moodaviigu avamine. tulemus tuple
+                        else:
+                            if v3_control != None:
+                                print('v3 is not closed, cum runtime ',v3_control[3],', v3 closing is possible') # debug
+                            bp_control=f5.output(0) # tulemus tuple
+                            v3_control=f4.output(Tairwater_error) # 3T ventiili sulgemine. tulemus tuple
+                
+                
+                else: # no pulse due to pump speed on wrong or no limit
+                    v3_control=f4.output(0) # 3T
+                    bp_control=f5.output(0) # bypass
+                    #print('avoiding any pulse due to pump speed onlimit',pump_onlimit,'water temp error',Tairwater_setpoint - Tairwater_actual)
+                    
+                #abimuutujad onlimit
+                v3_onlimit = v3_control[2] # length, state, self.onLimit, int(self.runtime)
+                bp_onlimit = bp_control[2]
+                
+                # 3Tventiili abiteenuste tegemine, aeg sekundites
+                if v3_control[0]<0:  # >0: # vajaliku imp kestus sekundites
+                    set_aovalue(abs(1000*v3_control[0]),9,110) # pwm do10 (value,mba,reg)
+                elif v3_control[0]>0: # <0: # dn
+                    set_aovalue(abs(1000*v3_control[0]),9,111) # pwm do11 (value,mba,reg)  / up vist
                 else:  # no pulse start needed 
-                    if pulsecontrol[1] == 0: # no ongoing pulse 
+                    if v3_control[1] == 0: # no ongoing pulse 
                         set_aovalue(0,9,110) # to be ready for the next pulse via aochannels / aichannels sync
                         set_aovalue(0,9,111) # to be ready for the next pulse via aochannels / aichannels sync
-                        set_aivalue('V1W',1,pulsecontrol[3]) # kumul runtime muudetuna 0..100 voi -a -100..0 voi ka -20..70 vahemikku. FB pote puudub!
+                        set_aivalue('V1W',1,v3_control[3]) # kumul runtime muudetuna 0..100 voi -a -100..0 voi ka -20..70 vahemikku. FB pote puudub!
                 
-                #if pulsecontrol[1]<0:  # >0: # up - nivoodega juhtimine, kuid liiga harva, et tapne olla
-                #    setbit_dosvc('K2W',1,1) # svc,member,value
-                #    setbit_dosvc('K2W',2,0) # igaks juhuks, startimisel voib vaja olla....
-                #elif pulsecontrol[1]>0: # <0: # dn
-                #    setbit_dosvc('K2W',2,1) # svc,member,value
-                #    setbit_dosvc('K2W',1,0) # igaks juhuks, startimisel voib vaja olla....
-                #else:  # no pulse 
-                #    setbit_dosvc('K2W',1,0)
-                #    setbit_dosvc('K2W',2,0)
-                #    set_aivalue('V1W',2,pulsecontrol[3]) # kumul runtime muudetuna 0..100 voi -a -100..0 voi ka -20..70 vahemikku. FB pote puudub!
-            else:
-                msg='waiting for AppUptime to grow up to 100 s before pulsecontrol, currently '+str(AppUptime)
+                # bypass klapi abiteenuste tegemine, aeg sekundites
+                # do 2000 avamine, 90s . do 1000 sulgemine, 110s. 
+                if bp_control[0]<0:  # >0: # vajaliku imp kestus sekundites
+                    set_aovalue(abs(1000*bp_control[0]),9,112) # pwm do10 (value,mba,reg)  112 sulgeb
+                elif bp_control[0]>0: # <0: # dn
+                    set_aovalue(abs(1000*bp_control[0]),9,113) # pwm do11 (value,mba,reg)  / 113 avab
+                else:  # no pulse start needed 
+                    if bp_control[1] == 0: # no ongoing pulse 
+                        set_aovalue(0,9,112) # to be ready for the next pulse via aochannels / aichannels sync
+                        set_aovalue(0,9,113) # to be ready for the next pulse via aochannels / aichannels sync
+                        set_aivalue('V1W',2,bp_control[3]) # kumul runtime muudetuna 0..100 voi -a -100..0 voi ka -20..70 vahemikku. FB pote puudub!
+                
+                
+            else: # enne kui 3 min labi, ventiile ei liiguta. 1,5 min oli liiga vahe, hakkas ilmaaegu peale restarti lahti kruvima!
+                set_aovalue(0,9,110) # to be ready for the next pulse via aochannels / aichannels sync
+                set_aovalue(0,9,111) # to be ready for the next pulse via aochannels / aichannels sync
+                set_aovalue(0,9,112) # to be ready for the next pulse via aochannels / aichannels sync
+                set_aovalue(0,9,113) # to be ready for the next pulse via aochannels / aichannels sync
+                set_aivalue('V1W',1,0) # kysiks serverist eelmist??
+                set_aivalue('V1W',2,0) # 
+
+                msg='waiting for AppUptime to grow up to 200 s before v3_control, currently '+str(AppUptime)
                 print(msg)
                 syslog(msg)
                 
         else:
-            msg='data for pid or pulsecontrol not ready yet! initializing f1...f4'
+            msg='data for pid or v3_control not ready yet! initializing f1...f4'
             print(msg)
             syslog(msg)
-            f1.Initialize()  # et mingi jama integraal ei koguneks valede andmetega
-            f2.Initialize()
-            f3.Initialize()
-            f4.Initialize()
+            f1.Initialize() # et mingi jama integraal ei koguneks valede andmetega
+            f2.Initialize() # sissepuhkeohu temp
+            f3.Initialize() # kalorif vesi
+            f4.Initialize() # 3T
+            f5.Initialize() # bypass
+            bp_control=[0,0,0,0] # 3 liiget, debug jaoks vaja ainult defineerida
+            v3_control=[0,0,0,0]
             setup2pid() # kehtestab setup alusel igasugu parameetrid. voimalik, et initialize pole siis vajagi.//
             
         #############    
@@ -3842,9 +3899,9 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
         set_aivalue('T8W',4,Tairwater_setpoint) # monitooringu perfdata hulka
         set_aivalue('T8W',5,Tairwater_setpoint) # monitooringu perfdata hulka
         
-        f3.setSetpoint(Tairwater_setpoint) # etteanne mootorikeerajale veetemp, saadakse pid regulaatoritest
-        pumpout=f3.output(Tairwater_actual) # outputs tuple. 
-        pump_onlimit=pumpout[5] # onlimit -1..1 for pulsegeneration that is moved to more frequent execution above. 
+        f3.setSetpoint(Tairwater_setpoint) # etteanne veetemp
+        pumpout=f3.output(Tairwater_actual) # outputs tuple. mootori kiirus jms
+        pump_onlimit=pumpout[5] # onlimit -1..1, no more speed change possible (0..200)
         pump_speed=int(round(pumpout[0])) # olgu int
         
         msg='pid setpoints: f1 f2 f3 '+str(round(Tairout_setpoint))+', '+str(round(Tairin_setpoint))+', '+str(round(Tairwater_setpoint))+'\n'
@@ -3864,9 +3921,12 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
         # vent juhtimine V2W liikmed 1 ja 2, esialgu yhtemoodi
         #vent_setpoint=float(get_setupvalue('S220')) # max kiirus 0xffff  voi pigem 0xfff0. s220 piirkond 0..100!
         if vent_setpoint > 100:
+            print('illegal vent_setpoint',vent_setpoint,', FIXING TO 100')
             vent_setpoint = 100
         elif vent_setpoint <0:
+            print('illegal vent_setpoint',vent_setpoint,', FIXING TO 0')
             vent_setpoint = 0 # tegelikult peaks min piiri kontrollima, aga hiljem.
+            
         set_aovalue(int(655.2*vent_setpoint),1,53249) # (value,mba,reg)
         set_aovalue(int(655.2*vent_setpoint),2,53249) # (value,mba,reg)
         msg='vent speed is '+str(round(vent_setpoint))+'%, sent to vents on mba 1 and 2' # debug
@@ -3965,6 +4025,7 @@ while stop == 0: # ################  MAIN LOOP BEGIN  ##########################
 
         
         # check setpoints from calendar
+        print('checking setpoints from calendar table, current setpoints V, T are',vent_setpoint,Tairin_setpoint)
         sp=chk_calevents('V') # vent speed setpoint based on gcal or setup, temporary variable
         osp=vent_setpoint # old setpoint, temporary
         if sp != None and sp != '':

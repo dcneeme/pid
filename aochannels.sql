@@ -14,9 +14,14 @@ INSERT INTO "aochannels" VALUES('2','53249','','65535','','','vent 2 speed','');
 
 INSERT INTO "aochannels" VALUES('3','1','','1','','','pump 1 speed','max 200'); -- tsirk pump 1 
 INSERT INTO "aochannels" VALUES('4','1','','1','','','pump 2 speed','max 200'); -- tsirk pump 2 starman
+INSERT INTO "aochannels" VALUES('3','40','5','5','','','pump 1 on','on 4, off 4 voi 0'); -- tsirk pump 1 starman
+INSERT INTO "aochannels" VALUES('4','40','5','5','','','pump 2 on','on 4, off 4 voi 0'); -- tsirk pump 2 starman
 
-INSERT INTO "aochannels" VALUES('9','110','','0','','','ajami impulss','max 4'); -- ajami juhtimine koos aichannels M1W
-INSERT INTO "aochannels" VALUES('9','111','','0','','','ajami impulss','max 4'); -- ajami juhtimine koos aichannels M1W
+INSERT INTO "aochannels" VALUES('9','110','','0','','','3T ajami impulss','max 4'); -- ajami juhtimine koos aichannels M1W
+INSERT INTO "aochannels" VALUES('9','111','','0','','','3T ajami impulss','max 4'); -- ajami juhtimine koos aichannels M1W
+
+INSERT INTO "aochannels" VALUES('9','112','','0','','','bypass ajami impulss','max 4'); -- ajami juhtimine koos aichannels M4W
+INSERT INTO "aochannels" VALUES('9','113','','0','','','bypass ajami impulss','max 4'); -- ajami juhtimine koos aichannels M4W
 
 CREATE UNIQUE INDEX do_mbareg on 'aochannels'(mba,regadd); -- you need to put a name to the channel even if you do not plan to report it
 

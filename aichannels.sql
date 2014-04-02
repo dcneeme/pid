@@ -71,16 +71,24 @@ INSERT INTO "aichannels" VALUES('4','1','P1W','2','17','0','200','0','100','0','
 INSERT INTO "aichannels" VALUES('','','P1W','3','0','0','100','0','100','0','10','1','','','10','0','','lo warning','ao',2); -- 10%
 INSERT INTO "aichannels" VALUES('','','P1W','4','0','0','100','0','100','0','95','1','','','95','0','','hi warning','ao',2); -- 95%
 
-INSERT INTO "aichannels" VALUES('','','V1W','1','17','0','120','0','100','-90','90','1','','','110','0','','pump1','ao',2); -- valve pos cumul runtime (tegelik 120 max)
-INSERT INTO "aichannels" VALUES('','','V1W','2','0','0','100','0','100','0','100','1','','','-100','0','','pump 2','ao',2); -- min
-INSERT INTO "aichannels" VALUES('','','V1W','3','0','0','100','0','100','0','10','1','','','100','0','','lo warning','ao',2); -- max joon
+INSERT INTO "aichannels" VALUES('','','V1W','1','17','0','120','0','100','-90','90','1','','','110','0','','pump1','ao',2); -- asendid kumul tooaja alusel 3T ja bypass , 3t
+INSERT INTO "aichannels" VALUES('','','V1W','2','17','0','240','0','100','-90','90','1','','','110','0','','pump1','ao',2); -- valve pos cumul runtime bypass
+-- INSERT INTO "aichannels" VALUES('','','V1W','2','0','0','100','0','100','0','100','1','','','-100','0','','pump 2','ao',2); -- min / ei kasuta, ei pysi tapselt seal vahel nagunii
+-- INSERT INTO "aichannels" VALUES('','','V1W','3','0','0','100','0','100','0','10','1','','','100','0','','lo warning','ao',2); -- max joon
 
 INSERT INTO "aichannels" VALUES('1','53249','V2W','1','17','0','65520','0','100','10','100','1','','','110','0','','vent1 speed juht','ao',2); -- vent 1 0..100, juhtimine ao. tegelikku vt allpool inpout reg kui huvitab....
 INSERT INTO "aichannels" VALUES('2','53249','V2W','2','17','0','65520','0','100','10','100','1','','','110','0','','vent2 speed juht','ao',2); -- vent2 0..100 0..ffff, kasuta ao kaudu juhtimiseks
 INSERT INTO "aichannels" VALUES('','','V2W','3','0','0','100','0','100','0','10','1','','','20','0','','lo warning','ao',2); -- min joon, hoiatuseks?
 
-INSERT INTO "aichannels" VALUES('9','110','M1W','1','16','0','100','0','100','0','100','1','','','110','0','','ajami juht','ao',2); -- ajami juhtimise abiteenus, viimase imp kestus ms
-INSERT INTO "aichannels" VALUES('9','111','M1W','2','16','0','100','0','100','10','100','1','','','110','0','','ajami juht','ao',2); -- ajami juhtimise abiteenus
+INSERT INTO "aichannels" VALUES('9','110','M1W','1','16','0','100','0','100','0','100','1','','','110','0','','3Tajami juht','ao',2); -- 3Tajami juhtimise abiteenus, viimase imp kestus ms
+INSERT INTO "aichannels" VALUES('9','111','M1W','2','16','0','100','0','100','10','100','1','','','110','0','','3Tajami juht','ao',2); -- 3T ajami juhtimise abiteenus
+
+INSERT INTO "aichannels" VALUES('9','112','M4W','1','16','0','100','0','100','0','100','1','','','110','0','','ByPass ajami juht','ao',2); -- moodaviigu ajami juhtimise abiteenus kinnisemaks viimase imp kestus ms
+INSERT INTO "aichannels" VALUES('9','113','M4W','2','16','0','100','0','100','10','100','1','','','110','0','','ByPass ajami juht','ao',2); -- moodaviigu ajami juhtimise abiteenus lahtisemaks
+
+-- kontroll pumba too luba
+INSERT INTO "aichannels" VALUES('3','40','P7W','1','32','0','100','0','100','0','0','1','','','0','0','','pump1 luba','',2); -- pump1 
+INSERT INTO "aichannels" VALUES('4','40','P7W','2','32','0','100','0','100','0','0','1','','','0','0','','pump2 luba','',2); -- pump2  keldris. 
 
 
 -- lisa siia torustiku rohk reg 2 ja pumpade voolud reg 4 ning 5. lugeda fc 04, mitte 03!
